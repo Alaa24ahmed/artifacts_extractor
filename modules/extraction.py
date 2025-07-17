@@ -91,54 +91,6 @@ def extract_artifacts_from_page(image_path, page_num, document_name, model, fina
         return []
     
 
-# def extract_artifacts_from_page(
-#     image_path, 
-#     page_num, 
-#     document_name, 
-#     model, 
-#     final_corrected_text,
-#     artifact_prompt_template,
-#     results_dir
-# ):
-#     """Extract artifacts from a single page using the corrected text."""
-#     # Check if this page has already been processed
-#     page_output_file = os.path.join(results_dir, f"page_{page_num}_artifacts.json")
-#     if os.path.exists(page_output_file):
-#         logger.info(f"Page {page_num} already processed, loading results")
-#         with open(page_output_file, 'r', encoding='utf-8') as f:
-#             return json.load(f)
-    
-#     # Format the artifact extraction prompt
-#     artifact_prompt = artifact_prompt_template.format(
-#         page_number=page_num,
-#         context=f"Document: {document_name} (English)"
-#     )
-    
-#     # Format the full prompt
-#     full_prompt = artifact_prompt.replace("{extracted_text}", final_corrected_text)
-    
-#     try:
-#         # Call the text API
-#         analysis_response = call_api_for_model(model, "text", prompt=full_prompt)
-#         analysis_text = extract_content_from_response(analysis_response, model)
-        
-#         # Parse artifacts
-#         artifacts = parse_artifacts_from_text(analysis_text, page_num, document_name)
-        
-#         # Save page results
-#         if artifacts:
-#             with open(page_output_file, 'w', encoding='utf-8') as f:
-#                 json.dump(artifacts, f, indent=2, ensure_ascii=False)
-            
-#             logger.info(f"Found {len(artifacts)} artifacts on page {page_num}")
-#         else:
-#             logger.info(f"No artifacts found on page {page_num}")
-        
-#         return artifacts
-#     except Exception as e:
-#         logger.error(f"Error extracting artifacts from page {page_num}: {e}")
-#         return []
-
 def extract_multilingual_names_from_page(image_path, page_num, page_artifacts, document_name, model, lang, 
                                         name_extraction_prompt, ocr_prompt_template, correction_prompt_template, 
                                         output_dirs, results_dir, correction_threshold):
