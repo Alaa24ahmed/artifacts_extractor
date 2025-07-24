@@ -787,9 +787,9 @@ def display_results(output_dir=None):
                 st.dataframe(df, use_container_width=True, height=400)
             
             # Download buttons
-            st.markdown('<h3>Download Results</h3>', unsafe_allow_html=True)
+            st.markdown('<h3>Actions</h3>', unsafe_allow_html=True)
             
-            col1, col2 = st.columns(2)
+            col1, col2, col3 = st.columns(3)
             
             # JSON download
             with open(json_file, "rb") as f:
@@ -828,6 +828,12 @@ def display_results(output_dir=None):
                         mime="text/csv",
                         use_container_width=True
                     )
+            
+            # Save to database button - using regular button style, not custom class
+            with col3:
+                if st.button("💾 Save to Database", use_container_width=True, key="save_to_db_button"):
+                    st.info("Database integration is coming soon! This feature is under development.")
+                
         except Exception as e:
             st.markdown(f'<div class="error-card">Error displaying results: {str(e)}</div>', unsafe_allow_html=True)
             st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
@@ -1011,21 +1017,13 @@ def main():
     with st.container():
         st.markdown('<div class="config-section">', unsafe_allow_html=True)
         
-        # Model selection in columns
-        model_col1, model_col2, model_col3 = st.columns(3)
+        # Model selection in columns - only showing OCR and Extraction models
+        model_col1, model_col2 = st.columns(2)
+        
+        # Always use GPT-4o as the model (but don't display it in UI)
+        model = "gpt-4o"
         
         with model_col1:
-            st.markdown("<p><b>Primary Model</b></p>", unsafe_allow_html=True)
-            model = st.selectbox(
-                "Primary Model",
-                ["gpt-4o", "gpt-4", "gpt-4o-mini", "gemini", "mistral-ocr"],
-                index=0,
-                disabled=st.session_state.processing_status['status'] == 'processing',
-                key="primary_model",
-                label_visibility="collapsed"
-            )
-        
-        with model_col2:
             st.markdown("<p><b>OCR Model</b></p>", unsafe_allow_html=True)
             ocr_model = st.selectbox(
                 "OCR Model",
@@ -1036,7 +1034,7 @@ def main():
                 label_visibility="collapsed"
             )
         
-        with model_col3:
+        with model_col2:
             st.markdown("<p><b>Extraction Model</b></p>", unsafe_allow_html=True)
             extraction_model = st.selectbox(
                 "Extraction Model",
@@ -1051,20 +1049,44 @@ def main():
         start_page = 1
         end_page = None
         correction_thresholds = CORRECTION_THRESHOLDS.copy()
+        # Set Arabic threshold to 0.05 by default
+        correction_thresholds["AR"] = 0.05
         
         # Advanced options
-        with st.expander("Advanced Options", expanded=False):
+        with st.expander("Advanced Options", expanded=True):
             # Page range
             st.markdown("<p><b>Page Range</b></p>", unsafe_allow_html=True)
-            page_col1, page_col2 = st.columns(2)
+            page_col1, page_col2, page_col3 = st.columns([1, 1, 1])
+            
             with page_col1:
                 start_page = st.number_input("Start Page", min_value=1, value=1, 
-                                           disabled=st.session_state.processing_status['status'] == 'processing')
+                                           disabled=st.session_state.processing_status['status'] == 'processing',
+                                           key="start_page")
+            
             with page_col2:
-                end_page_input = st.number_input("End Page", min_value=0, value=0, 
-                                         help="Set to 0 to process all pages",
-                                         disabled=st.session_state.processing_status['status'] == 'processing')
-                if end_page_input > 0:
+                # Add "All pages" checkbox
+                all_pages = st.checkbox("Till end of document", 
+                                     value=True,
+                                     disabled=st.session_state.processing_status['status'] == 'processing',
+                                     key="all_pages")
+            
+            with page_col3:
+                if all_pages:
+                    # If "all pages" is checked, show disabled input with placeholder
+                    st.number_input("End Page", 
+                                  min_value=start_page, 
+                                  value=start_page,
+                                  disabled=True,
+                                  key="end_page_disabled",
+                                  label_visibility="visible")
+                    end_page = None  # Use None to indicate all pages
+                else:
+                    # If "all pages" is unchecked, allow manual entry
+                    end_page_input = st.number_input("End Page", 
+                                                 min_value=start_page, 
+                                                 value=start_page,
+                                                 disabled=st.session_state.processing_status['status'] == 'processing',
+                                                 key="end_page_enabled")
                     end_page = end_page_input
             
             # Correction thresholds
@@ -1093,7 +1115,7 @@ def main():
             with threshold_col3:
                 st.markdown('<span class="lang-badge ar-badge">AR</span> <b>Arabic</b>', unsafe_allow_html=True)
                 correction_thresholds["AR"] = st.slider("Arabic Threshold", min_value=0.01, max_value=0.2, 
-                                       value=CORRECTION_THRESHOLDS["AR"], 
+                                       value=0.05,  # Default set to 0.05 for Arabic
                                        step=0.01, format="%.2f", 
                                        disabled=st.session_state.processing_status['status'] == 'processing',
                                        key="ar_threshold",
@@ -1151,12 +1173,12 @@ def main():
         
         # Check API keys
         missing_keys = []
-        if model in ["gpt-4", "gpt-4o", "gpt-4o-mini"] and not st.session_state.openai_api_key:
+        if not st.session_state.openai_api_key:  # Always check for OpenAI API key since we're using GPT-4o
             missing_keys.append("OpenAI API Key")
-        if model == "gemini" and not st.session_state.google_api_key:
-            missing_keys.append("Google API Key")
         if ocr_model == "mistral-ocr" and not st.session_state.mistral_api_key:
             missing_keys.append("Mistral API Key")
+        if (ocr_model == "gemini" or extraction_model == "gemini") and not st.session_state.google_api_key:
+            missing_keys.append("Google API Key")
         
         # Warning about missing API keys - shown above the buttons
         if missing_keys:
