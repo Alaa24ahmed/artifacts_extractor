@@ -1363,7 +1363,7 @@ def main():
                 # Display logs based on auto-scroll setting
                 if auto_scroll:
                     # Create a scrollable iframe that always stays at the bottom
-                    log_height = 300
+                    log_height = 500
                     st.markdown(f"""
                     <div style="height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
                         <iframe srcdoc='
