@@ -8,7 +8,7 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
-from dotenv import load_dotenv
+# from dotenv import load_dotenv
 import glob
 import traceback
 import logging
@@ -17,7 +17,7 @@ import io
 import re
 
 # Load environment variables
-load_dotenv("/home/alaa.elsetohy/Desktop/internship/SCAI/config/.env")
+# load_dotenv("/home/alaa.elsetohy/Desktop/internship/SCAI/config/.env")
 
 # Set page config
 st.set_page_config(
