@@ -1017,33 +1017,53 @@ def main():
     with st.container():
         st.markdown('<div class="config-section">', unsafe_allow_html=True)
         
-        # Model selection in columns - only showing OCR and Extraction models
+        # Model selection in columns - only showing OCR and Extraction models with descriptive names
         model_col1, model_col2 = st.columns(2)
         
         # Always use GPT-4o as the model (but don't display it in UI)
         model = "gpt-4o"
         
+        # Define model display names and mapping
+        ocr_model_options = [
+            ("GPT-4o", "gpt-4o"),
+            ("GPT-4", "gpt-4"),
+            ("GPT-4o Mini", "gpt-4o-mini"),
+            ("Gemini 2.5 Flash", "gemini"),
+            ("Mistral OCR", "mistral-ocr")
+        ]
+        
+        extraction_model_options = [
+            ("GPT-4o", "gpt-4o"),
+            ("GPT-4", "gpt-4"),
+            ("GPT-4o Mini", "gpt-4o-mini"),
+            ("Gemini 2.5 Flash", "gemini")
+        ]
+        
         with model_col1:
             st.markdown("<p><b>OCR Model</b></p>", unsafe_allow_html=True)
-            ocr_model = st.selectbox(
+            ocr_display_value = st.selectbox(
                 "OCR Model",
-                ["gpt-4o", "gpt-4", "gpt-4o-mini", "gemini", "mistral-ocr"],
-                index=4,  # Default to mistral-ocr
+                [option[0] for option in ocr_model_options],
+                index=4,  # Default to Mistral OCR
                 disabled=st.session_state.processing_status['status'] == 'processing',
-                key="ocr_model",
+                key="ocr_model_display",
                 label_visibility="collapsed"
             )
+            # Map display value back to internal value
+            ocr_model = next(option[1] for option in ocr_model_options if option[0] == ocr_display_value)
         
         with model_col2:
             st.markdown("<p><b>Extraction Model</b></p>", unsafe_allow_html=True)
-            extraction_model = st.selectbox(
+            extraction_display_value = st.selectbox(
                 "Extraction Model",
-                ["gpt-4o", "gpt-4", "gpt-4o-mini", "gemini"],
-                index=0,  # Default to gpt-4o
+                [option[0] for option in extraction_model_options],
+                index=0,  # Default to GPT-4o
                 disabled=st.session_state.processing_status['status'] == 'processing',
-                key="extraction_model",
+                key="extraction_model_display",
                 label_visibility="collapsed"
             )
+            # Map display value back to internal value
+            extraction_model = next(option[1] for option in extraction_model_options if option[0] == extraction_display_value)
         
         # Initialize default values before the expander
         start_page = 1
@@ -1150,11 +1170,11 @@ def main():
                 os.environ["MISTRAL_API_KEY"] = mistral_key
             
             # Google API Key
-            st.markdown("<p><b>Google API Key</b> (required for Gemini model)</p>", unsafe_allow_html=True)
+            st.markdown("<p><b>Google API Key</b> (required for Gemini 2.5 Flash model)</p>", unsafe_allow_html=True)
             google_key = st.text_input("Google API Key", type="password",
                                     value=st.session_state.google_api_key,
                                     disabled=st.session_state.processing_status['status'] == 'processing',
-                                    placeholder="Enter your Google API key for Gemini",
+                                    placeholder="Enter your Google API key for Gemini 2.5 Flash",
                                     key="google_key_input",
                                     label_visibility="collapsed")
             if google_key:

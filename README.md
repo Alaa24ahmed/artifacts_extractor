@@ -8,7 +8,7 @@ A specialized system for extracting artifact information from multilingual museu
 - **OCR with Correction**: Uses advanced OCR with adaptive correction for accurate text extraction
 - **AI-Powered Extraction**: Leverages AI models to identify and extract artifact information
 - **Cross-Language Alignment**: Aligns artifact names across different language versions
-- **Flexible Model Selection**: Choose between different AI models (Mistral OCR, GPT-4o, Gemini)
+- **Flexible Model Selection**: Choose between different AI models (Mistral OCR, GPT-4o, Gemini 2.5 Flash)
 
 ## Project Structure
 

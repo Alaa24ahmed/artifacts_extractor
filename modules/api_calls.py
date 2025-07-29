@@ -154,7 +154,7 @@ def call_openai_api_text(text_content, prompt_template=None, model_name="gpt-4o"
 
 def call_gemini_api(image_path, prompt):
     """Call Gemini API with the image and prompt."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
     
     encoded_image = encode_image_to_base64(image_path)
     
@@ -183,7 +183,7 @@ def call_gemini_api(image_path, prompt):
 
 def call_gemini_api_correction(image_path, raw_text, prompt_template, context, page_num):
     """Call Gemini API for OCR correction with both image and raw text."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
     
     # Generate prompt with raw text
     prompt = prompt_template.format(
@@ -217,7 +217,7 @@ def call_gemini_api_correction(image_path, raw_text, prompt_template, context, p
 
 def call_gemini_api_text(text_content, prompt_template=None):
     """Call Gemini API with text-only prompt."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={os.getenv('GOOGLE_API_KEY')}"
     
     # Format the prompt if a template is provided
     if prompt_template:
