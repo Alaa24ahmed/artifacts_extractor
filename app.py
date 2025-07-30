@@ -893,11 +893,14 @@ def display_results(output_dir=None):
                                     
                                     # Save to database
                                     with st.spinner("Saving to database..."):
-                                        db.save_artifacts(file_name, file_hash, artifacts_data)
+                                        success = db.save_artifacts_from_data(file_name, file_hash, artifacts_data)
                                     
-                                    artifact_count = len(artifacts_data.get('artifacts', []))
-                                    st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
-                                    st.info(f"📁 Saved from: {os.path.basename(results_file)}")
+                                    if success:
+                                        artifact_count = len(artifacts_data.get('artifacts', []))
+                                        st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
+                                        st.info(f"📁 Saved from: {os.path.basename(results_file)}")
+                                    else:
+                                        st.error("❌ Failed to save artifacts to database.")
                                 else:
                                     # Debug: show what files are available
                                     st.error("❌ No artifact results found to save.")
@@ -1338,8 +1341,19 @@ def main():
                     os.remove(RESULTS_PATH_FILE)
                 if os.path.exists(TRIGGER_REFRESH_FILE):
                     os.remove(TRIGGER_REFRESH_FILE)
+                if os.path.exists(PROCESSING_START_TIME_FILE):
+                    os.remove(PROCESSING_START_TIME_FILE)
                 
-                # Reset and reconfigure logging
+                # Clear previous processing state completely
+                st.session_state.processing_start_time = None
+                st.session_state.processing_status = {
+                    'status': 'processing',  # Set to processing immediately
+                    'message': 'Starting processing...',
+                    'progress': 5,
+                    'results_dir': None
+                }
+                
+                # Reset and reconfigure logging (this clears previous logs)
                 st.session_state.logger = setup_logging()
                 st.session_state.logger.info("Starting new processing run")
                 
@@ -1424,14 +1438,20 @@ def main():
                     'error': None
                 }
                 
+                # Reset processing start time
+                st.session_state.processing_start_time = None
+                
+                # Reset and clear logging (this clears all logs)
+                st.session_state.logger = setup_logging()
+                
                 # Also reset all the files
                 for file_path in [STATUS_FILE, COMPLETION_MARKER, RESULTS_PATH_FILE, 
                                 PROCESSING_START_TIME_FILE, TRIGGER_REFRESH_FILE]:
                     if os.path.exists(file_path):
                         os.remove(file_path)
                 
-                # Reset processing start time
-                st.session_state.processing_start_time = None
+                # Force UI refresh
+                st.rerun()
             st.markdown('</div>', unsafe_allow_html=True)
         
         st.markdown('</div>', unsafe_allow_html=True)

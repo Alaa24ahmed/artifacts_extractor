@@ -100,6 +100,45 @@ class SimpleArtifactDB:
             logger.error(f"Error checking cache: {e}")
             return None
     
+    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data: Dict) -> bool:
+        """Save artifacts to database from JSON data (when we don't have the original file)"""
+        if not self.enabled:
+            return False
+            
+        try:
+            # Extract artifacts from the data structure
+            artifacts = artifacts_data.get('artifacts', [])
+            if not artifacts:
+                logger.warning(f"No artifacts found in data for {file_name}")
+                return False
+            
+            # Save artifacts
+            artifact_record = {
+                "file_name": file_name,
+                "file_hash": file_hash,
+                "artifact_data": artifacts,
+                "artifact_count": len(artifacts)
+            }
+            
+            self.supabase_client.table("artifacts").insert(artifact_record).execute()
+            
+            # Save cache entry
+            cache_record = {
+                "file_hash": file_hash,
+                "file_name": file_name,
+                "artifact_count": len(artifacts)
+            }
+            
+            # Use upsert to avoid duplicates
+            self.supabase_client.table("processing_cache").upsert(cache_record).execute()
+            
+            logger.info(f"💾 Saved {len(artifacts)} artifacts for {file_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving artifacts from data: {e}")
+            return False
+
     def save_artifacts(self, file_path: str, artifacts: List[Dict]) -> bool:
         """Save artifacts to database"""
         if not self.enabled or not artifacts:
