@@ -849,30 +849,37 @@ def display_results(output_dir=None):
                             if db is None:
                                 st.warning("Database not configured. Please set up your .env file with Supabase credentials.")
                             else:
-                                # Find the results file - look for various patterns
-                                json_patterns = [
-                                    os.path.join(output_dir, "**/results.json"),
-                                    os.path.join(output_dir, "**/*_multilingual.json"),
-                                    os.path.join(output_dir, "**/*_multilingual_raw.json"),
-                                    os.path.join(output_dir, "**/english_artifacts.json")
-                                ]
+                                # Use the same logic as display_results to find files
+                                results_file = None
                                 
-                                json_files = []
-                                for pattern in json_patterns:
-                                    json_files.extend(glob.glob(pattern, recursive=True))
-                                
-                                if json_files:
-                                    # Prefer validated multilingual results
-                                    results_file = None
-                                    for file in json_files:
-                                        if "_multilingual.json" in file and "_raw" not in file:
-                                            results_file = file
+                                # First check if output_dir has multilingual files
+                                if output_dir and os.path.exists(output_dir):
+                                    for file in os.listdir(output_dir):
+                                        if file.endswith("_multilingual.json"):
+                                            results_file = os.path.join(output_dir, file)
                                             break
-                                    
-                                    # Fallback to any available results file
-                                    if not results_file:
-                                        results_file = json_files[0]
-                                    
+                                
+                                # If not found, check the results path file
+                                if not results_file and os.path.exists(RESULTS_PATH_FILE):
+                                    try:
+                                        with open(RESULTS_PATH_FILE, 'r') as f:
+                                            results_file_path = f.read().strip()
+                                            if os.path.exists(results_file_path) and results_file_path.endswith("_multilingual.json"):
+                                                results_file = results_file_path
+                                    except Exception:
+                                        pass
+                                
+                                # If still not found, search in temp directory
+                                if not results_file:
+                                    for root, dirs, files in os.walk(st.session_state.temp_dir):
+                                        for file in files:
+                                            if file.endswith("_multilingual.json"):
+                                                results_file = os.path.join(root, file)
+                                                break
+                                        if results_file:
+                                            break
+                                
+                                if results_file:
                                     file_name = os.path.basename(results_file).replace('.json', '')
                                     
                                     # Load and save artifacts
@@ -893,12 +900,47 @@ def display_results(output_dir=None):
                                     st.info(f"📁 Saved from: {os.path.basename(results_file)}")
                                 else:
                                     # Debug: show what files are available
-                                    all_json_files = glob.glob(os.path.join(output_dir, "**/*.json"), recursive=True)
-                                    if all_json_files:
-                                        file_list = [os.path.basename(f) for f in all_json_files[:10]]
-                                        st.error(f"No results file found. Available JSON files: {', '.join(file_list)}")
+                                    st.error("❌ No artifact results found to save.")
+                                    
+                                    # Show detailed debugging info
+                                    st.markdown("**🔍 Debug Information:**")
+                                    st.code(f"Output directory: {output_dir}")
+                                    
+                                    if output_dir and os.path.exists(output_dir):
+                                        all_files = []
+                                        for root, dirs, files in os.walk(output_dir):
+                                            for file in files:
+                                                file_path = os.path.join(root, file)
+                                                rel_path = os.path.relpath(file_path, output_dir)
+                                                all_files.append(rel_path)
+                                        
+                                        if all_files:
+                                            st.markdown("**📁 All files in output directory:**")
+                                            for file in sorted(all_files):
+                                                st.text(f"  {file}")
+                                        else:
+                                            st.text("No files found in output directory")
                                     else:
-                                        st.error("No JSON files found in output directory.")
+                                        st.text(f"Output directory does not exist: {output_dir}")
+                                    
+                                    # Also check temp directory
+                                    st.markdown("**🔍 Checking temp directory:**")
+                                    st.code(f"Temp directory: {st.session_state.temp_dir}")
+                                    temp_json_files = []
+                                    if hasattr(st.session_state, 'temp_dir') and os.path.exists(st.session_state.temp_dir):
+                                        for root, dirs, files in os.walk(st.session_state.temp_dir):
+                                            for file in files:
+                                                if file.endswith('.json'):
+                                                    file_path = os.path.join(root, file)
+                                                    rel_path = os.path.relpath(file_path, st.session_state.temp_dir)
+                                                    temp_json_files.append(rel_path)
+                                    
+                                    if temp_json_files:
+                                        st.markdown("**📁 JSON files in temp directory:**")
+                                        for file in sorted(temp_json_files):
+                                            st.text(f"  {file}")
+                                    else:
+                                        st.text("No JSON files found in temp directory")
                         except Exception as e:
                             st.error(f"Error saving to database: {str(e)}")
                             st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
