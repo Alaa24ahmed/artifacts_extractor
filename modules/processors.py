@@ -2,6 +2,8 @@
 import os
 import json
 import logging
+from dotenv import load_dotenv
+from pathlib import Path
 from .image_processing import extract_images_from_pdf, prepare_input_image
 from .correction import perform_ocr_with_adaptive_correction
 from .extraction import extract_artifacts_from_page, extract_multilingual_names_from_page
@@ -9,6 +11,12 @@ from .validation import validate_and_complete_multilingual_names
 from .data_utils import save_artifacts_to_csv
 from .simple_db import get_simple_db
 import re
+
+# Load environment variables from the project root
+project_root = Path(__file__).parent.parent
+env_path = project_root / ".env"
+load_dotenv(env_path)
+
 logger = logging.getLogger(__name__)
 
 def process_english_document(input_file, output_dir, model, start_page=1, end_page=None, 

@@ -8,7 +8,7 @@ import time
 import threading
 from datetime import datetime
 from pathlib import Path
-# from dotenv import load_dotenv
+from dotenv import load_dotenv
 import glob
 import traceback
 import logging
@@ -24,7 +24,9 @@ except ImportError:
     DATABASE_AVAILABLE = False
 
 # Load environment variables
-# load_dotenv("/home/alaa.elsetohy/Desktop/internship/SCAI/config/.env")
+project_root = Path(__file__).parent
+env_path = project_root / ".env"
+load_dotenv(env_path)
 
 # Set page config
 st.set_page_config(

@@ -7,6 +7,13 @@ import hashlib
 import logging
 from typing import List, Dict, Optional
 from datetime import datetime
+from dotenv import load_dotenv
+from pathlib import Path
+
+# Load environment variables from the project root
+project_root = Path(__file__).parent.parent
+env_path = project_root / ".env"
+load_dotenv(env_path)
 
 logger = logging.getLogger(__name__)
 
@@ -21,18 +28,23 @@ class SimpleArtifactDB:
         try:
             url = os.getenv("SUPABASE_URL")
             key = os.getenv("SUPABASE_ANON_KEY")
-            enable = os.getenv("ENABLE_SUPABASE", "false").lower() == "true"
+            enable = os.getenv("ENABLE_SUPABASE", "false").lower()
             
-            if url and key and enable:
+            logger.info(f"🔍 Environment check - URL: {'SET' if url else 'NOT SET'}, "
+                       f"KEY: {'SET' if key else 'NOT SET'}, "
+                       f"ENABLE: {enable}")
+            
+            if url and key and enable == "true":
                 from supabase import create_client
                 self.supabase_client = create_client(url, key)
                 self.enabled = True
                 logger.info("✅ Simple database client initialized")
             else:
-                logger.info("📝 Database disabled (missing config or ENABLE_SUPABASE=false)")
+                logger.info(f"📝 Database disabled - URL: {bool(url)}, KEY: {bool(key)}, ENABLE: {enable}")
                 
         except Exception as e:
             logger.warning(f"⚠️ Database initialization failed: {e}")
+            self.enabled = False
     
     def _hash_file(self, file_path: str) -> str:
         """Generate SHA-256 hash of file content"""
