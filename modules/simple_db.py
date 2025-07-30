@@ -103,6 +103,7 @@ class SimpleArtifactDB:
     def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data: Dict) -> bool:
         """Save artifacts to database from JSON data (when we don't have the original file)"""
         if not self.enabled:
+            logger.warning("Database not enabled - cannot save artifacts")
             return False
             
         try:
@@ -110,7 +111,10 @@ class SimpleArtifactDB:
             artifacts = artifacts_data.get('artifacts', [])
             if not artifacts:
                 logger.warning(f"No artifacts found in data for {file_name}")
+                logger.debug(f"Available keys in artifacts_data: {list(artifacts_data.keys())}")
                 return False
+            
+            logger.info(f"Attempting to save {len(artifacts)} artifacts for {file_name}")
             
             # Save artifacts
             artifact_record = {
@@ -120,7 +124,9 @@ class SimpleArtifactDB:
                 "artifact_count": len(artifacts)
             }
             
-            self.supabase_client.table("artifacts").insert(artifact_record).execute()
+            logger.debug(f"Inserting artifact record: {artifact_record}")
+            artifacts_result = self.supabase_client.table("artifacts").insert(artifact_record).execute()
+            logger.debug(f"Artifacts insert result: {artifacts_result}")
             
             # Save cache entry
             cache_record = {
@@ -129,14 +135,18 @@ class SimpleArtifactDB:
                 "artifact_count": len(artifacts)
             }
             
-            # Use upsert to avoid duplicates
-            self.supabase_client.table("processing_cache").upsert(cache_record).execute()
+            logger.debug(f"Upserting cache record: {cache_record}")
+            cache_result = self.supabase_client.table("processing_cache").upsert(cache_record).execute()
+            logger.debug(f"Cache upsert result: {cache_result}")
             
-            logger.info(f"💾 Saved {len(artifacts)} artifacts for {file_name}")
+            logger.info(f"💾 Successfully saved {len(artifacts)} artifacts for {file_name}")
             return True
             
         except Exception as e:
             logger.error(f"Error saving artifacts from data: {e}")
+            logger.error(f"Error details: {type(e).__name__}: {str(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
     def save_artifacts(self, file_path: str, artifacts: List[Dict]) -> bool:

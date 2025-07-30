@@ -886,6 +886,15 @@ def display_results(output_dir=None):
                                     with open(results_file, 'r', encoding='utf-8') as f:
                                         artifacts_data = json.load(f)
                                     
+                                    # Debug: show the data structure
+                                    st.markdown("**🔍 Data Structure Debug:**")
+                                    st.code(f"Keys in artifacts_data: {list(artifacts_data.keys())}")
+                                    if 'artifacts' in artifacts_data:
+                                        st.code(f"Number of artifacts: {len(artifacts_data['artifacts'])}")
+                                    else:
+                                        st.code("'artifacts' key not found in data")
+                                        st.code(f"Sample data: {str(artifacts_data)[:200]}...")
+                                    
                                     # Calculate file hash for the processed files
                                     import hashlib
                                     file_content = json.dumps(artifacts_data, sort_keys=True)
@@ -893,14 +902,24 @@ def display_results(output_dir=None):
                                     
                                     # Save to database
                                     with st.spinner("Saving to database..."):
-                                        success = db.save_artifacts_from_data(file_name, file_hash, artifacts_data)
-                                    
-                                    if success:
-                                        artifact_count = len(artifacts_data.get('artifacts', []))
-                                        st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
-                                        st.info(f"📁 Saved from: {os.path.basename(results_file)}")
-                                    else:
-                                        st.error("❌ Failed to save artifacts to database.")
+                                        try:
+                                            success = db.save_artifacts_from_data(file_name, file_hash, artifacts_data)
+                                            
+                                            if success:
+                                                artifact_count = len(artifacts_data.get('artifacts', []))
+                                                st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
+                                                st.info(f"📁 Saved from: {os.path.basename(results_file)}")
+                                            else:
+                                                st.error("❌ Failed to save artifacts to database.")
+                                                # Debug info
+                                                st.markdown("**🔍 Debug Info:**")
+                                                st.code(f"Database enabled: {db.enabled}")
+                                                st.code(f"File name: {file_name}")
+                                                st.code(f"File hash: {file_hash[:20]}...")
+                                                st.code(f"Artifacts count: {len(artifacts_data.get('artifacts', []))}")
+                                        except Exception as save_error:
+                                            st.error(f"❌ Error during save: {str(save_error)}")
+                                            st.code(f"Error details: {save_error}")
                                 else:
                                     # Debug: show what files are available
                                     st.error("❌ No artifact results found to save.")
