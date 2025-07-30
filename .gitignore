@@ -9,6 +9,9 @@ LAD_Orsay_ENG_BAT_final/
 config/.env
 *.env
 
+# Temporary documentation
+README_SIMPLE.md
+
 # Python artifacts
 __pycache__/
 *.py[cod]

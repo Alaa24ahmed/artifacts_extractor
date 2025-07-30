@@ -12,3 +12,4 @@ beautifulsoup4>=4.9.0
 python-multipart>=0.0.5
 tqdm>=4.60.0
 matplotlib>=3.5.0
+supabase>=2.0.0

@@ -16,6 +16,13 @@ from logging.handlers import RotatingFileHandler
 import io
 import re
 
+# Import database functionality
+try:
+    from modules.simple_db import get_simple_db
+    DATABASE_AVAILABLE = True
+except ImportError:
+    DATABASE_AVAILABLE = False
+
 # Load environment variables
 # load_dotenv("/home/alaa.elsetohy/Desktop/internship/SCAI/config/.env")
 
@@ -832,7 +839,39 @@ def display_results(output_dir=None):
             # Save to database button - using regular button style, not custom class
             with col3:
                 if st.button("💾 Save to Database", use_container_width=True, key="save_to_db_button"):
-                    st.info("Database integration is coming soon! This feature is under development.")
+                    if not DATABASE_AVAILABLE:
+                        st.error("Database module not available. Please check your setup.")
+                    else:
+                        try:
+                            db = get_simple_db()
+                            if db is None:
+                                st.warning("Database not configured. Please set up your .env file with Supabase credentials.")
+                            else:
+                                # Find the results file
+                                json_files = glob.glob(os.path.join(output_dir, "**/results.json"), recursive=True)
+                                if json_files:
+                                    results_file = json_files[0]
+                                    file_name = os.path.basename(results_file.replace('/results.json', ''))
+                                    
+                                    # Load and save artifacts
+                                    with open(results_file, 'r', encoding='utf-8') as f:
+                                        artifacts_data = json.load(f)
+                                    
+                                    # Calculate file hash for the processed files
+                                    import hashlib
+                                    file_content = json.dumps(artifacts_data, sort_keys=True)
+                                    file_hash = hashlib.sha256(file_content.encode()).hexdigest()
+                                    
+                                    # Save to database
+                                    with st.spinner("Saving to database..."):
+                                        db.save_artifacts(file_name, file_hash, artifacts_data)
+                                    
+                                    st.success(f"✅ Successfully saved {len(artifacts_data.get('artifacts', []))} artifacts to database!")
+                                else:
+                                    st.error("No results.json file found to save.")
+                        except Exception as e:
+                            st.error(f"Error saving to database: {str(e)}")
+                            st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
                 
         except Exception as e:
             st.markdown(f'<div class="error-card">Error displaying results: {str(e)}</div>', unsafe_allow_html=True)
