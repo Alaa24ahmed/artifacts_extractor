@@ -888,12 +888,20 @@ def display_results(output_dir=None):
                                     
                                     # Debug: show the data structure
                                     st.markdown("**🔍 Data Structure Debug:**")
-                                    st.code(f"Keys in artifacts_data: {list(artifacts_data.keys())}")
-                                    if 'artifacts' in artifacts_data:
-                                        st.code(f"Number of artifacts: {len(artifacts_data['artifacts'])}")
-                                    else:
-                                        st.code("'artifacts' key not found in data")
-                                        st.code(f"Sample data: {str(artifacts_data)[:200]}...")
+                                    st.code(f"Data type: {type(artifacts_data).__name__}")
+                                    
+                                    if isinstance(artifacts_data, dict):
+                                        st.code(f"Keys in artifacts_data: {list(artifacts_data.keys())}")
+                                        if 'artifacts' in artifacts_data:
+                                            st.code(f"Number of artifacts: {len(artifacts_data['artifacts'])}")
+                                        else:
+                                            st.code("'artifacts' key not found in data")
+                                    elif isinstance(artifacts_data, list):
+                                        st.code(f"List with {len(artifacts_data)} items")
+                                        if artifacts_data:
+                                            st.code(f"First item type: {type(artifacts_data[0]).__name__}")
+                                    
+                                    st.code(f"Sample data: {str(artifacts_data)[:200]}...")
                                     
                                     # Calculate file hash for the processed files
                                     import hashlib

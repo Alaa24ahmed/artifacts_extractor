@@ -100,18 +100,37 @@ class SimpleArtifactDB:
             logger.error(f"Error checking cache: {e}")
             return None
     
-    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data: Dict) -> bool:
+    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data) -> bool:
         """Save artifacts to database from JSON data (when we don't have the original file)"""
         if not self.enabled:
             logger.warning("Database not enabled - cannot save artifacts")
             return False
             
         try:
-            # Extract artifacts from the data structure
-            artifacts = artifacts_data.get('artifacts', [])
+            # Handle different data structures
+            artifacts = []
+            
+            if isinstance(artifacts_data, list):
+                # If artifacts_data is already a list of artifacts
+                artifacts = artifacts_data
+                logger.info(f"Received artifacts as list with {len(artifacts)} items")
+            elif isinstance(artifacts_data, dict):
+                # If artifacts_data is a dict, look for 'artifacts' key
+                artifacts = artifacts_data.get('artifacts', [])
+                logger.info(f"Received artifacts as dict, extracted {len(artifacts)} artifacts")
+                
+                # If no 'artifacts' key, maybe the dict itself is an artifact
+                if not artifacts and artifacts_data:
+                    artifacts = [artifacts_data]
+                    logger.info("Treating single dict as one artifact")
+            else:
+                logger.error(f"Unexpected data type: {type(artifacts_data)}")
+                return False
+            
             if not artifacts:
                 logger.warning(f"No artifacts found in data for {file_name}")
-                logger.debug(f"Available keys in artifacts_data: {list(artifacts_data.keys())}")
+                if isinstance(artifacts_data, dict):
+                    logger.debug(f"Available keys in artifacts_data: {list(artifacts_data.keys())}")
                 return False
             
             logger.info(f"Attempting to save {len(artifacts)} artifacts for {file_name}")
@@ -124,7 +143,7 @@ class SimpleArtifactDB:
                 "artifact_count": len(artifacts)
             }
             
-            logger.debug(f"Inserting artifact record: {artifact_record}")
+            logger.debug(f"Inserting artifact record with {len(artifacts)} artifacts")
             artifacts_result = self.supabase_client.table("artifacts").insert(artifact_record).execute()
             logger.debug(f"Artifacts insert result: {artifacts_result}")
             
