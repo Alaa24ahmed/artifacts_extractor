@@ -856,7 +856,6 @@ def display_results(output_dir=None):
                                 st.warning("Database not configured. Please check your .env file with Supabase credentials.")
                             elif not db.enabled:
                                 st.warning("Database disabled. Check environment variables:")
-                                import os
                                 st.code(f"SUPABASE_URL: {'SET' if os.getenv('SUPABASE_URL') else 'NOT SET'}")
                                 st.code(f"SUPABASE_ANON_KEY: {'SET' if os.getenv('SUPABASE_ANON_KEY') else 'NOT SET'}")
                                 st.code(f"ENABLE_SUPABASE: {os.getenv('ENABLE_SUPABASE', 'NOT SET')}")

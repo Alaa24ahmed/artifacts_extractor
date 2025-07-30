@@ -18,13 +18,6 @@ load_dotenv(env_path, override=True)  # Force override existing values
 # Also try to load from current directory as fallback
 load_dotenv(".env", override=False)  # Don't override if already set
 
-# Debug: Check if variables are loaded
-import os
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_ANON_KEY") 
-enable = os.getenv("ENABLE_SUPABASE", "false")
-print(f"🔧 simple_db.py environment load - URL: {'SET' if url else 'NOT SET'}, KEY: {'SET' if key else 'NOT SET'}, ENABLE: {enable}")
-
 logger = logging.getLogger(__name__)
 
 class SimpleArtifactDB:
