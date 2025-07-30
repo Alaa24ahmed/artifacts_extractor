@@ -849,11 +849,31 @@ def display_results(output_dir=None):
                             if db is None:
                                 st.warning("Database not configured. Please set up your .env file with Supabase credentials.")
                             else:
-                                # Find the results file
-                                json_files = glob.glob(os.path.join(output_dir, "**/results.json"), recursive=True)
+                                # Find the results file - look for various patterns
+                                json_patterns = [
+                                    os.path.join(output_dir, "**/results.json"),
+                                    os.path.join(output_dir, "**/*_multilingual.json"),
+                                    os.path.join(output_dir, "**/*_multilingual_raw.json"),
+                                    os.path.join(output_dir, "**/english_artifacts.json")
+                                ]
+                                
+                                json_files = []
+                                for pattern in json_patterns:
+                                    json_files.extend(glob.glob(pattern, recursive=True))
+                                
                                 if json_files:
-                                    results_file = json_files[0]
-                                    file_name = os.path.basename(results_file.replace('/results.json', ''))
+                                    # Prefer validated multilingual results
+                                    results_file = None
+                                    for file in json_files:
+                                        if "_multilingual.json" in file and "_raw" not in file:
+                                            results_file = file
+                                            break
+                                    
+                                    # Fallback to any available results file
+                                    if not results_file:
+                                        results_file = json_files[0]
+                                    
+                                    file_name = os.path.basename(results_file).replace('.json', '')
                                     
                                     # Load and save artifacts
                                     with open(results_file, 'r', encoding='utf-8') as f:
@@ -868,9 +888,17 @@ def display_results(output_dir=None):
                                     with st.spinner("Saving to database..."):
                                         db.save_artifacts(file_name, file_hash, artifacts_data)
                                     
-                                    st.success(f"✅ Successfully saved {len(artifacts_data.get('artifacts', []))} artifacts to database!")
+                                    artifact_count = len(artifacts_data.get('artifacts', []))
+                                    st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
+                                    st.info(f"📁 Saved from: {os.path.basename(results_file)}")
                                 else:
-                                    st.error("No results.json file found to save.")
+                                    # Debug: show what files are available
+                                    all_json_files = glob.glob(os.path.join(output_dir, "**/*.json"), recursive=True)
+                                    if all_json_files:
+                                        file_list = [os.path.basename(f) for f in all_json_files[:10]]
+                                        st.error(f"No results file found. Available JSON files: {', '.join(file_list)}")
+                                    else:
+                                        st.error("No JSON files found in output directory.")
                         except Exception as e:
                             st.error(f"Error saving to database: {str(e)}")
                             st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
