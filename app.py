@@ -846,8 +846,20 @@ def display_results(output_dir=None):
                     else:
                         try:
                             db = get_simple_db()
+                            
+                            # Debug database initialization
+                            st.markdown("**🔍 Database Debug:**")
+                            st.code(f"Database object: {db}")
+                            st.code(f"Database enabled: {db.enabled if db else 'None'}")
+                            
                             if db is None:
-                                st.warning("Database not configured. Please set up your .env file with Supabase credentials.")
+                                st.warning("Database not configured. Please check your .env file with Supabase credentials.")
+                            elif not db.enabled:
+                                st.warning("Database disabled. Check environment variables:")
+                                import os
+                                st.code(f"SUPABASE_URL: {'SET' if os.getenv('SUPABASE_URL') else 'NOT SET'}")
+                                st.code(f"SUPABASE_ANON_KEY: {'SET' if os.getenv('SUPABASE_ANON_KEY') else 'NOT SET'}")
+                                st.code(f"ENABLE_SUPABASE: {os.getenv('ENABLE_SUPABASE', 'NOT SET')}")
                             else:
                                 # Use the same logic as display_results to find files
                                 results_file = None
@@ -914,7 +926,14 @@ def display_results(output_dir=None):
                                             success = db.save_artifacts_from_data(file_name, file_hash, artifacts_data)
                                             
                                             if success:
-                                                artifact_count = len(artifacts_data.get('artifacts', []))
+                                                # Calculate artifact count based on data type
+                                                if isinstance(artifacts_data, list):
+                                                    artifact_count = len(artifacts_data)
+                                                elif isinstance(artifacts_data, dict):
+                                                    artifact_count = len(artifacts_data.get('artifacts', []))
+                                                else:
+                                                    artifact_count = 0
+                                                
                                                 st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
                                                 st.info(f"📁 Saved from: {os.path.basename(results_file)}")
                                             else:
@@ -924,7 +943,12 @@ def display_results(output_dir=None):
                                                 st.code(f"Database enabled: {db.enabled}")
                                                 st.code(f"File name: {file_name}")
                                                 st.code(f"File hash: {file_hash[:20]}...")
-                                                st.code(f"Artifacts count: {len(artifacts_data.get('artifacts', []))}")
+                                                if isinstance(artifacts_data, list):
+                                                    st.code(f"Artifacts count: {len(artifacts_data)}")
+                                                elif isinstance(artifacts_data, dict):
+                                                    st.code(f"Artifacts count: {len(artifacts_data.get('artifacts', []))}")
+                                                else:
+                                                    st.code(f"Unexpected data type: {type(artifacts_data)}")
                                         except Exception as save_error:
                                             st.error(f"❌ Error during save: {str(save_error)}")
                                             st.code(f"Error details: {save_error}")
