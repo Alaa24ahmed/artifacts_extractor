@@ -10,10 +10,20 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 
-# Load environment variables from the project root
+# Load environment variables from the project root - force reload
 project_root = Path(__file__).parent.parent
 env_path = project_root / ".env"
-load_dotenv(env_path)
+load_dotenv(env_path, override=True)  # Force override existing values
+
+# Also try to load from current directory as fallback
+load_dotenv(".env", override=False)  # Don't override if already set
+
+# Debug: Check if variables are loaded
+import os
+url = os.getenv("SUPABASE_URL")
+key = os.getenv("SUPABASE_ANON_KEY") 
+enable = os.getenv("ENABLE_SUPABASE", "false")
+print(f"🔧 simple_db.py environment load - URL: {'SET' if url else 'NOT SET'}, KEY: {'SET' if key else 'NOT SET'}, ENABLE: {enable}")
 
 logger = logging.getLogger(__name__)
 
