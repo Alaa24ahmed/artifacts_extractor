@@ -8,6 +8,7 @@ LAD_Orsay_ENG_BAT_final/
 .env
 config/.env
 *.env
+.streamlit/secrets.toml
 
 # Temporary documentation
 README_SIMPLE.md

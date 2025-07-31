@@ -10,13 +10,17 @@ from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
 
-# Load environment variables from the project root - force reload
-project_root = Path(__file__).parent.parent
-env_path = project_root / ".env"
-load_dotenv(env_path, override=True)  # Force override existing values
-
-# Also try to load from current directory as fallback
-load_dotenv(".env", override=False)  # Don't override if already set
+# Load configuration using the configuration manager
+try:
+    from .config_manager import load_configuration
+    load_configuration()
+    print("✅ Configuration loaded in simple_db.py")
+except Exception as e:
+    print(f"⚠️ Error loading configuration in simple_db.py: {e}")
+    # Fallback to manual loading
+    project_root = Path(__file__).parent.parent
+    env_path = project_root / ".env"
+    load_dotenv(env_path, override=True)
 
 logger = logging.getLogger(__name__)
 

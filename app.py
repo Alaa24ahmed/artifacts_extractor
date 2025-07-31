@@ -16,17 +16,28 @@ from logging.handlers import RotatingFileHandler
 import io
 import re
 
+# Add the project root to Python path
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, SCRIPT_DIR)
+
+# Load configuration using the new configuration manager
+try:
+    from modules.config_manager import load_configuration, get_config_status
+    load_configuration()
+    print("✅ Configuration loaded successfully")
+except Exception as e:
+    print(f"⚠️ Error loading configuration: {e}")
+    # Fallback to manual loading
+    project_root = Path(__file__).parent
+    env_path = project_root / ".env"
+    load_dotenv(env_path, override=True)
+
 # Import database functionality
 try:
     from modules.simple_db import get_simple_db
     DATABASE_AVAILABLE = True
 except ImportError:
     DATABASE_AVAILABLE = False
-
-# Load environment variables
-project_root = Path(__file__).parent
-env_path = project_root / ".env"
-load_dotenv(env_path)
 
 # Set page config
 st.set_page_config(
@@ -471,6 +482,18 @@ def process_documents(doc_group, output_dir, model, start_page, end_page,
                      ocr_model, extraction_model):
     """Process documents in a background thread"""
     try:
+        # Ensure configuration is loaded in this background thread
+        try:
+            from modules.config_manager import load_configuration
+            load_configuration()
+            print("✅ Configuration loaded in background thread")
+        except Exception as e:
+            print(f"⚠️ Error loading configuration in background thread: {e}")
+            # Fallback to manual loading
+            project_root = Path(__file__).parent
+            env_path = project_root / ".env"
+            load_dotenv(env_path, override=True)
+        
         # Update status file to indicate processing has started
         update_status_file(
             status='processing',
@@ -1107,6 +1130,31 @@ def main():
     
     # App title and description
     st.markdown('<div class="title-container"><h1>🏛️ Multilingual Museum Artifact Extractor</h1></div>', unsafe_allow_html=True)
+    
+    # Configuration Status (expandable)
+    with st.expander("🔧 Configuration Status", expanded=False):
+        try:
+            from modules.config_manager import get_config_status
+            config_status = get_config_status()
+            
+            st.markdown("#### Database Configuration")
+            db_vars = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'ENABLE_SUPABASE']
+            for var in db_vars:
+                status = config_status.get(var, {})
+                icon = "✅" if status.get('set') else "❌"
+                source = status.get('source', 'unknown')
+                st.markdown(f"- **{var}**: {icon} (Source: {source})")
+            
+            st.markdown("#### API Keys")
+            api_vars = ['OPENAI_API_KEY', 'MISTRAL_API_KEY', 'GOOGLE_API_KEY']
+            for var in api_vars:
+                status = config_status.get(var, {})
+                icon = "✅" if status.get('set') else "❌"
+                source = status.get('source', 'unknown')
+                st.markdown(f"- **{var}**: {icon} (Source: {source})")
+                
+        except Exception as e:
+            st.error(f"Error checking configuration status: {e}")
     
     st.markdown("""
     This application extracts detailed artifact information from multilingual museum catalogs.
