@@ -77,24 +77,25 @@ class SimpleArtifactDB:
         file_name = ""
         if file_path:
             file_hash = self._hash_file(file_path)
+            # Use the original filename as uploaded (English document name)
             file_name = os.path.basename(file_path)
+            # Keep the original filename with extension for English documents
         
         # Map old field names to new schema
         mapped_data = {
             "file_hash": artifact_data.get("file_hash", file_hash),
             "file_name": artifact_data.get("file_name", file_name),
-            "name_en": artifact_data.get("name_english", artifact_data.get("name", artifact_data.get("Name", ""))),
-            "name_ar": artifact_data.get("name_arabic", artifact_data.get("Name_AR", "")),
-            "name_fr": artifact_data.get("name_french", artifact_data.get("Name_FR", "")),
+            "name_en": artifact_data.get("Name_EN", artifact_data.get("name_english", artifact_data.get("name", artifact_data.get("Name", "")))),
+            "name_ar": artifact_data.get("Name_AR", artifact_data.get("name_arabic", "")),
+            "name_fr": artifact_data.get("Name_FR", artifact_data.get("name_french", "")),
             "creator": artifact_data.get("creator", artifact_data.get("Creator", "")),
-            "creation_date": artifact_data.get("period", artifact_data.get("creation_date", artifact_data.get("Creation Date", ""))),
-            "materials": artifact_data.get("material", artifact_data.get("materials", artifact_data.get("Materials", ""))),
+            "creation_date": artifact_data.get("Creation Date", artifact_data.get("period", artifact_data.get("creation_date", ""))),
+            "materials": artifact_data.get("materials", artifact_data.get("Materials", artifact_data.get("material", ""))),
             "origin": artifact_data.get("origin", artifact_data.get("Origin", "")),
             "description": artifact_data.get("description", artifact_data.get("Description", "")),
             "category": artifact_data.get("category", artifact_data.get("Category", "")),
             "source_page": artifact_data.get("page_number", artifact_data.get("source_page", 0)),
-            "source_document": artifact_data.get("source_document", file_name),
-            "name_validation": artifact_data.get("name_validation", ""),
+            "name_validation": artifact_data.get("Name_validation", artifact_data.get("name_validation", "")),
             # Model tracking fields
             "ocr_model": ocr_model or artifact_data.get("ocr_model", "mistral-ocr"),
             "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o"),
@@ -144,6 +145,34 @@ class SimpleArtifactDB:
             logger.error(f"Artifact data: {artifact_data}")
             logger.error(f"File path: {file_path}")
             return {}
+
+    def mark_file_processed(self, file_path: str, artifact_count: int = 0,
+                          ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o",
+                          processing_params_hash: str = ""):
+        """Mark a file as processed in cache with model information"""
+        try:
+            file_hash = self._hash_file(file_path) if file_path and os.path.exists(file_path) else file_path
+            # Use original filename as uploaded (English document name)
+            file_name = os.path.basename(file_path) if file_path else "unknown"
+            
+            cache_key = f"cache_{file_hash}_{ocr_model}_{extraction_model}_{processing_params_hash}"
+            
+            cache_data = {
+                "file_hash": file_hash,
+                "file_name": file_name,
+                "ocr_model": ocr_model,
+                "extraction_model": extraction_model,
+                "processing_params_hash": processing_params_hash,
+                "artifact_count": artifact_count,
+                "processing_status": "completed",
+                "created_at": datetime.now().isoformat()
+            }
+            
+            self.cache_db[cache_key] = cache_data
+            logger.info(f"Marked file {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
+            
+        except Exception as e:
+            logger.error(f"Error marking file as processed: {e}")
     
     def get_artifact(self, artifact_id: str) -> dict:
         """Get a single artifact by ID"""
@@ -290,7 +319,6 @@ class SimpleArtifactDB:
                         "Description": record.get("description", ""),
                         "Category": record.get("category", ""),
                         "source_page": record.get("source_page", 0),
-                        "source_document": record.get("source_document", ""),
                         "file_hash": record.get("file_hash", ""),
                         "file_name": record.get("file_name", "")
                     }
@@ -305,7 +333,9 @@ class SimpleArtifactDB:
             logger.error(f"Error checking cache: {e}")
             return None
 
-    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data) -> bool:
+    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data, 
+                               ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o", 
+                               processing_params_hash: str = "") -> bool:
         """Save artifacts to database from JSON data using new schema"""
         if not self.enabled:
             logger.warning("Database not enabled - cannot save artifacts")
@@ -339,28 +369,26 @@ class SimpleArtifactDB:
             saved_count = 0
             for artifact in artifacts:
                 try:
-                    # Map artifact to new schema
-                    mapped_artifact = self._map_artifact_to_db(artifact)
-                    mapped_artifact["file_hash"] = file_hash
-                    mapped_artifact["file_name"] = file_name
+                    # Save artifact with model tracking
+                    saved_artifact = self.add_artifact(
+                        artifact, 
+                        file_path=None,  # We already have file_hash and file_name
+                        ocr_model=ocr_model,
+                        extraction_model=extraction_model,
+                        processing_params_hash=processing_params_hash
+                    )
                     
-                    # Insert individual artifact
-                    result = self.supabase_client.table("artifacts").insert(mapped_artifact).execute()
-                    if result.data:
+                    if saved_artifact:
                         saved_count += 1
                 except Exception as e:
                     logger.error(f"Error saving individual artifact: {e}")
                     continue
             
             if saved_count > 0:
-                # Save cache entry
-                cache_record = {
-                    "file_hash": file_hash,
-                    "file_name": file_name,
-                    "artifact_count": saved_count
-                }
-                
-                self.supabase_client.table("processing_cache").upsert(cache_record).execute()
+                # Mark file as processed in cache
+                self.mark_file_processed(
+                    file_name, saved_count, ocr_model, extraction_model, processing_params_hash
+                )
                 logger.info(f"💾 Successfully saved {saved_count} artifacts for {file_name}")
                 return True
             else:
@@ -463,7 +491,6 @@ class SimpleArtifactDB:
                     "Description": record.get("description", ""),
                     "Category": record.get("category", ""),
                     "source_page": record.get("source_page", 0),
-                    "source_document": record.get("source_document", ""),
                     "file_hash": record.get("file_hash", ""),
                     "file_name": record.get("file_name", "")
                 }

@@ -93,24 +93,25 @@ class SupabaseArtifactManager:
         file_name = ""
         if file_path:
             file_hash = self._calculate_file_hash(file_path)
+            # Use the original filename as uploaded (English document name)
             file_name = os.path.basename(file_path)
+            # Keep the original filename with extension for English documents
         
         # Map old field names to new schema
         mapped_data = {
             "file_hash": artifact_data.get("file_hash", file_hash),
             "file_name": artifact_data.get("file_name", file_name),
-            "name_en": artifact_data.get("name_english", artifact_data.get("name", artifact_data.get("Name", ""))),
-            "name_ar": artifact_data.get("name_arabic", artifact_data.get("Name_AR", "")),
-            "name_fr": artifact_data.get("name_french", artifact_data.get("Name_FR", "")),
+            "name_en": artifact_data.get("Name_EN", artifact_data.get("name_english", artifact_data.get("name", artifact_data.get("Name", "")))),
+            "name_ar": artifact_data.get("Name_AR", artifact_data.get("name_arabic", "")),
+            "name_fr": artifact_data.get("Name_FR", artifact_data.get("name_french", "")),
             "creator": artifact_data.get("creator", artifact_data.get("Creator", "")),
-            "creation_date": artifact_data.get("period", artifact_data.get("creation_date", artifact_data.get("Creation Date", ""))),
-            "materials": artifact_data.get("material", artifact_data.get("materials", artifact_data.get("Materials", ""))),
+            "creation_date": artifact_data.get("Creation Date", artifact_data.get("period", artifact_data.get("creation_date", ""))),
+            "materials": artifact_data.get("materials", artifact_data.get("Materials", artifact_data.get("material", ""))),
             "origin": artifact_data.get("origin", artifact_data.get("Origin", "")),
             "description": artifact_data.get("description", artifact_data.get("Description", "")),
             "category": artifact_data.get("category", artifact_data.get("Category", "")),
             "source_page": artifact_data.get("page_number", artifact_data.get("source_page", 0)),
-            "source_document": artifact_data.get("source_document", file_name),
-            "name_validation": artifact_data.get("name_validation", ""),
+            "name_validation": artifact_data.get("Name_validation", artifact_data.get("name_validation", "")),
             # Model tracking fields
             "ocr_model": ocr_model or artifact_data.get("ocr_model", "mistral-ocr"),
             "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o"),
@@ -651,7 +652,6 @@ class SupabaseArtifactManager:
                 # Ensure file metadata is included
                 artifact['file_hash'] = artifact.get('file_hash', file_hash)
                 artifact['file_name'] = artifact.get('file_name', file_name)
-                artifact['source_document'] = artifact.get('source_document', file_name)
                 
                 db_data = self._map_artifact_to_db(artifact, file_path)
                 db_data['id'] = self._mock_id_counter
@@ -681,7 +681,6 @@ class SupabaseArtifactManager:
                 # Ensure file metadata is included
                 artifact['file_hash'] = artifact.get('file_hash', file_hash)
                 artifact['file_name'] = artifact.get('file_name', file_name)
-                artifact['source_document'] = artifact.get('source_document', file_name)
                 
                 db_record = self._map_artifact_to_db(artifact, file_path)
                 db_records.append(db_record)
