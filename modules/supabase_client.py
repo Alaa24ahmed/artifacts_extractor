@@ -15,7 +15,7 @@ except ImportError:
     raise
 
 # Import config manager
-from .config_manager import load_configuration
+from .config_manager import load_configuration, generate_processing_params_hash, get_model_identifiers
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +84,9 @@ class SupabaseArtifactManager:
                 hash_md5.update(chunk)
         return hash_md5.hexdigest()
 
-    def _map_artifact_to_db(self, artifact_data: dict, file_path: str = None) -> dict:
+    def _map_artifact_to_db(self, artifact_data: dict, file_path: str = None, 
+                           ocr_model: str = None, extraction_model: str = None,
+                           processing_params_hash: str = None) -> dict:
         """Map artifact data to match the new database schema"""
         # Calculate file hash and name if file_path provided
         file_hash = ""
@@ -108,40 +110,55 @@ class SupabaseArtifactManager:
             "category": artifact_data.get("category", artifact_data.get("Category", "")),
             "source_page": artifact_data.get("page_number", artifact_data.get("source_page", 0)),
             "source_document": artifact_data.get("source_document", file_name),
-            "name_validation": artifact_data.get("name_validation", "")
+            "name_validation": artifact_data.get("name_validation", ""),
+            # Model tracking fields
+            "ocr_model": ocr_model or artifact_data.get("ocr_model", "default_ocr"),
+            "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o-mini"),
+            "processing_params_hash": processing_params_hash or artifact_data.get("processing_params_hash", "")
         }
         
         # Remove None values
         return {k: v for k, v in mapped_data.items() if v is not None}
 
-    def check_file_processed(self, file_path: str) -> bool:
-        """Check if a file has already been processed"""
+    def check_file_processed(self, file_path: str, ocr_model: str = "default_ocr", 
+                           extraction_model: str = "gpt-4o-mini", processing_params_hash: str = "") -> bool:
+        """Check if a file has already been processed with specific models and parameters"""
         if self.mock_mode:
             file_hash = self._calculate_file_hash(file_path)
-            return file_hash in self._mock_data
+            cache_key = f"cache_{file_hash}_{ocr_model}_{extraction_model}_{processing_params_hash}"
+            return cache_key in self._mock_data
         
         try:
             file_hash = self._calculate_file_hash(file_path)
             response = self.client.table(self.cache_table)\
                 .select("file_hash")\
                 .eq("file_hash", file_hash)\
+                .eq("ocr_model", ocr_model)\
+                .eq("extraction_model", extraction_model)\
+                .eq("processing_params_hash", processing_params_hash)\
                 .execute()
             return len(response.data) > 0
         except Exception as e:
             logger.error(f"Error checking file processing status: {e}")
             return False
 
-    def mark_file_processed(self, file_path: str, artifact_count: int = 0):
-        """Mark a file as processed in cache"""
+    def mark_file_processed(self, file_path: str, artifact_count: int = 0,
+                          ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                          processing_params_hash: str = ""):
+        """Mark a file as processed in cache with model information"""
         if self.mock_mode:
             file_hash = self._calculate_file_hash(file_path)
             file_name = os.path.basename(file_path)
-            self._mock_data[f"cache_{file_hash}"] = {
+            cache_key = f"cache_{file_hash}_{ocr_model}_{extraction_model}_{processing_params_hash}"
+            self._mock_data[cache_key] = {
                 "file_hash": file_hash,
                 "file_name": file_name,
+                "ocr_model": ocr_model,
+                "extraction_model": extraction_model,
+                "processing_params_hash": processing_params_hash,
                 "artifact_count": artifact_count
             }
-            logger.info(f"Mock: Marked file {file_name} as processed with {artifact_count} artifacts")
+            logger.info(f"Mock: Marked file {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
             return
         
         try:
@@ -151,11 +168,14 @@ class SupabaseArtifactManager:
             cache_data = {
                 "file_hash": file_hash,
                 "file_name": file_name,
+                "ocr_model": ocr_model,
+                "extraction_model": extraction_model,
+                "processing_params_hash": processing_params_hash,
                 "artifact_count": artifact_count
             }
             
             self.client.table(self.cache_table).insert(cache_data).execute()
-            logger.info(f"Marked file {file_name} as processed with {artifact_count} artifacts")
+            logger.info(f"Marked file {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
         except Exception as e:
             logger.error(f"Error marking file as processed: {e}")
 
@@ -169,26 +189,26 @@ class SupabaseArtifactManager:
         return hashlib.md5(params_str.encode()).hexdigest()
 
     def check_page_processed(self, file_path: str, page_number: int, 
-                           model: str = "gpt-4o", **processing_params) -> bool:
-        """Check if a specific page has already been processed"""
+                           ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                           processing_params_hash: str = "") -> bool:
+        """Check if a specific page has already been processed with specific models"""
         if self.mock_mode:
             file_hash = self._calculate_file_hash(file_path)
-            params_hash = self._generate_processing_params_hash(model, **processing_params)
-            cache_key = f"{file_hash}_{page_number}_{model}_{params_hash}"
+            cache_key = f"page_{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
             return cache_key in self._mock_page_cache
         
         try:
             file_hash = self._calculate_file_hash(file_path)
-            params_hash = self._generate_processing_params_hash(model, **processing_params)
             
-            response = self.client.rpc("check_page_processed", {
+            response = self.client.rpc("check_page_processing_cache", {
                 "p_file_hash": file_hash,
                 "p_page_number": page_number,
-                "p_model": model,
-                "p_params_hash": params_hash
+                "p_ocr_model": ocr_model,
+                "p_extraction_model": extraction_model,
+                "p_processing_params_hash": processing_params_hash
             }).execute()
             
-            return response.data if response.data else False
+            return bool(response.data and response.data[0].get('cached', False))
         except Exception as e:
             logger.error(f"Error checking page processing status: {e}")
             return False
@@ -216,45 +236,44 @@ class SupabaseArtifactManager:
             return []
 
     def mark_page_processed(self, file_path: str, page_number: int, 
-                          artifact_count: int = 0, model: str = "gpt-4o", 
-                          **processing_params):
-        """Mark a specific page as processed"""
+                          artifact_count: int = 0, ocr_model: str = "default_ocr", 
+                          extraction_model: str = "gpt-4o-mini", processing_params_hash: str = ""):
+        """Mark a specific page as processed with model information"""
         if self.mock_mode:
             file_hash = self._calculate_file_hash(file_path)
             file_name = os.path.basename(file_path)
-            params_hash = self._generate_processing_params_hash(model, **processing_params)
-            cache_key = f"{file_hash}_{page_number}_{model}_{params_hash}"
+            cache_key = f"page_{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
             
             self._mock_page_cache[cache_key] = {
                 "file_hash": file_hash,
                 "file_name": file_name,
                 "page_number": page_number,
-                "processing_model": model,
-                "processing_params_hash": params_hash,
+                "ocr_model": ocr_model,
+                "extraction_model": extraction_model,
+                "processing_params_hash": processing_params_hash,
                 "artifact_count": artifact_count,
                 "processing_status": "completed"
             }
-            logger.info(f"Mock: Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts")
+            logger.info(f"Mock: Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
             return
         
         try:
             file_hash = self._calculate_file_hash(file_path)
             file_name = os.path.basename(file_path)
-            params_hash = self._generate_processing_params_hash(model, **processing_params)
             
             cache_data = {
                 "file_hash": file_hash,
                 "file_name": file_name,
                 "page_number": page_number,
-                "processing_model": model,
-                "processing_params_hash": params_hash,
+                "ocr_model": ocr_model,
+                "extraction_model": extraction_model,
+                "processing_params_hash": processing_params_hash,
                 "artifact_count": artifact_count,
                 "processing_status": "completed"
             }
             
-            # Use upsert to handle potential duplicates
-            self.client.table(self.page_cache_table).upsert(cache_data).execute()
-            logger.info(f"Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts")
+            self.client.table(self.page_cache_table).insert(cache_data).execute()
+            logger.info(f"Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
         except Exception as e:
             logger.error(f"Error marking page as processed: {e}")
 
@@ -311,22 +330,26 @@ class SupabaseArtifactManager:
             logger.error(f"Error getting artifacts by file: {e}")
             return []
 
-    def add_artifact(self, artifact_data: dict, file_path: str = None) -> dict:
-        """Add a new artifact to the database"""
+    def add_artifact(self, artifact_data: dict, file_path: str = None,
+                   ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                   processing_params_hash: str = "") -> dict:
+        """Add a new artifact to the database with model tracking"""
         if self.mock_mode:
-            db_data = self._map_artifact_to_db(artifact_data, file_path)
+            db_data = self._map_artifact_to_db(artifact_data, file_path, 
+                                             ocr_model, extraction_model, processing_params_hash)
             db_data['id'] = self._mock_id_counter
             self._mock_data[f"artifact_{self._mock_id_counter}"] = db_data
             self._mock_id_counter += 1
-            logger.info(f"Mock: Added artifact with ID: {db_data['id']}")
+            logger.info(f"Mock: Added artifact with ID: {db_data['id']} using {ocr_model}/{extraction_model}")
             return db_data
         
         try:
-            db_data = self._map_artifact_to_db(artifact_data, file_path)
+            db_data = self._map_artifact_to_db(artifact_data, file_path, 
+                                             ocr_model, extraction_model, processing_params_hash)
             response = self.client.table(self.table_name).insert(db_data).execute()
             
             if response.data:
-                logger.info(f"Added artifact with ID: {response.data[0]['id']}")
+                logger.info(f"Added artifact with ID: {response.data[0]['id']} using {ocr_model}/{extraction_model}")
                 return response.data[0]
             else:
                 logger.error("Failed to add artifact: No data returned")

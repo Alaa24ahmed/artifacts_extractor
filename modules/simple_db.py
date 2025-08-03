@@ -13,7 +13,7 @@ from pathlib import Path
 
 # Load configuration using the configuration manager
 try:
-    from .config_manager import load_configuration
+    from .config_manager import load_configuration, generate_processing_params_hash, get_model_identifiers
     load_configuration()
     print("✅ Configuration loaded in simple_db.py")
 except Exception as e:
@@ -68,7 +68,9 @@ class SimpleArtifactDB:
             logger.error(f"Error hashing file {file_path}: {e}")
             return ""
 
-    def _map_artifact_to_db(self, artifact_data: dict, file_path: str = None) -> dict:
+    def _map_artifact_to_db(self, artifact_data: dict, file_path: str = None,
+                           ocr_model: str = None, extraction_model: str = None,
+                           processing_params_hash: str = None) -> dict:
         """Map artifact data to match the new database schema"""
         # Calculate file hash and name if file_path provided
         file_hash = ""
@@ -92,7 +94,11 @@ class SimpleArtifactDB:
             "category": artifact_data.get("category", artifact_data.get("Category", "")),
             "source_page": artifact_data.get("page_number", artifact_data.get("source_page", 0)),
             "source_document": artifact_data.get("source_document", file_name),
-            "name_validation": artifact_data.get("name_validation", "")
+            "name_validation": artifact_data.get("name_validation", ""),
+            # Model tracking fields
+            "ocr_model": ocr_model or artifact_data.get("ocr_model", "default_ocr"),
+            "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o-mini"),
+            "processing_params_hash": processing_params_hash or artifact_data.get("processing_params_hash", "")
         }
         
         # Remove None values and empty strings for optional fields
@@ -102,11 +108,14 @@ class SimpleArtifactDB:
         """Calculate MD5 hash of a file (alias for _hash_file for compatibility)"""
         return self._hash_file(file_path)
     
-    def add_artifact(self, artifact_data: dict, file_path: str = None) -> dict:
-        """Add a new artifact to the database"""
+    def add_artifact(self, artifact_data: dict, file_path: str = None,
+                   ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                   processing_params_hash: str = "") -> dict:
+        """Add a new artifact to the database with model tracking"""
         try:
             # Map the artifact data to database schema
-            db_data = self._map_artifact_to_db(artifact_data, file_path)
+            db_data = self._map_artifact_to_db(artifact_data, file_path, 
+                                             ocr_model, extraction_model, processing_params_hash)
             
             # Generate unique ID
             artifact_id = str(len(self.db) + 1)
@@ -119,7 +128,7 @@ class SimpleArtifactDB:
             # Save to local database
             self.db[artifact_id] = db_data
             
-            logger.info(f"Added artifact with ID: {artifact_id}")
+            logger.info(f"Added artifact with ID: {artifact_id} using {ocr_model}/{extraction_model}")
             return db_data
             
         except Exception as e:
@@ -501,13 +510,22 @@ class SimpleArtifactDB:
         params_str = json.dumps(params, sort_keys=True)
         return hashlib.md5(params_str.encode()).hexdigest()
 
-    def check_page_processed(self, file_path: str, page_number: int) -> bool:
-        """Check if a specific page has already been processed by looking at artifacts table"""
+    def check_page_processed(self, file_path: str, page_number: int,
+                           ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                           processing_params_hash: str = "") -> bool:
+        """Check if a specific page has already been processed with specific models"""
         file_hash = self._calculate_file_hash(file_path)
+        cache_key = f"{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
         
+        if cache_key in self.page_cache_db:
+            return True
+        
+        # Also check in artifacts table directly
         for artifact in self.db.values():
             if (artifact.get("file_hash") == file_hash and 
-                artifact.get("source_page") == page_number):
+                artifact.get("source_page") == page_number and
+                artifact.get("ocr_model") == ocr_model and
+                artifact.get("extraction_model") == extraction_model):
                 return True
         return False
 
@@ -524,26 +542,27 @@ class SimpleArtifactDB:
         return sorted(artifacts, key=lambda x: x.get("id", 0))
 
     def mark_page_processed(self, file_path: str, page_number: int, 
-                          artifact_count: int = 0, model: str = "gpt-4o", 
-                          **processing_params):
-        """Mark a specific page as processed"""
+                          artifact_count: int = 0, ocr_model: str = "default_ocr", 
+                          extraction_model: str = "gpt-4o-mini", processing_params_hash: str = ""):
+        """Mark a specific page as processed with model information"""
         file_hash = self._calculate_file_hash(file_path)
         file_name = os.path.basename(file_path)
-        params_hash = self._generate_processing_params_hash(model, **processing_params)
-        cache_key = f"{file_hash}_{page_number}_{model}_{params_hash}"
+        cache_key = f"{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
         
         cache_data = {
             "file_hash": file_hash,
             "file_name": file_name,
             "page_number": page_number,
-            "processing_model": model,
-            "processing_params_hash": params_hash,
+            "ocr_model": ocr_model,
+            "extraction_model": extraction_model,
+            "processing_params_hash": processing_params_hash,
             "artifact_count": artifact_count,
             "processing_status": "completed",
             "created_at": datetime.now().isoformat()
         }
         
         self.page_cache_db[cache_key] = cache_data
+        logger.info(f"Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
 
     def get_processed_pages(self, file_path: str) -> List[int]:
         """Get list of already processed page numbers for a file by checking artifacts table"""

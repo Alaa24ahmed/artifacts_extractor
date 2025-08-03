@@ -1131,31 +1131,6 @@ def main():
     # App title and description
     st.markdown('<div class="title-container"><h1>🏛️ Multilingual Museum Artifact Extractor</h1></div>', unsafe_allow_html=True)
     
-    # Configuration Status (expandable)
-    with st.expander("🔧 Configuration Status", expanded=False):
-        try:
-            from modules.config_manager import get_config_status
-            config_status = get_config_status()
-            
-            st.markdown("#### Database Configuration")
-            db_vars = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'ENABLE_SUPABASE']
-            for var in db_vars:
-                status = config_status.get(var, {})
-                icon = "✅" if status.get('set') else "❌"
-                source = status.get('source', 'unknown')
-                st.markdown(f"- **{var}**: {icon} (Source: {source})")
-            
-            st.markdown("#### API Keys")
-            api_vars = ['OPENAI_API_KEY', 'MISTRAL_API_KEY', 'GOOGLE_API_KEY']
-            for var in api_vars:
-                status = config_status.get(var, {})
-                icon = "✅" if status.get('set') else "❌"
-                source = status.get('source', 'unknown')
-                st.markdown(f"- **{var}**: {icon} (Source: {source})")
-                
-        except Exception as e:
-            st.error(f"Error checking configuration status: {e}")
-    
     st.markdown("""
     This application extracts detailed artifact information from multilingual museum catalogs.
     Upload documents in English, Arabic, and French to create a consolidated artifact database.

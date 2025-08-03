@@ -2,6 +2,8 @@
 Configuration manager for handling environment variables and Streamlit secrets
 """
 import os
+import hashlib
+import json
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -112,9 +114,55 @@ def get_config_status():
     
     return status
 
+def generate_processing_params_hash(ocr_correction_threshold=None, api_model=None, 
+                                  temperature=None, max_tokens=None, **kwargs):
+    """
+    Generate a hash of processing parameters for cache invalidation.
+    This ensures we re-process when any significant parameter changes.
+    """
+    params = {
+        'ocr_correction_threshold': ocr_correction_threshold,
+        'api_model': api_model,
+        'temperature': temperature,
+        'max_tokens': max_tokens,
+    }
+    
+    # Add any additional parameters
+    params.update(kwargs)
+    
+    # Remove None values and sort for consistent hashing
+    filtered_params = {k: v for k, v in params.items() if v is not None}
+    
+    # Create deterministic JSON string
+    params_str = json.dumps(filtered_params, sort_keys=True, default=str)
+    
+    # Generate SHA256 hash
+    return hashlib.sha256(params_str.encode()).hexdigest()[:16]  # 16 chars for brevity
+
+def get_model_identifiers(config):
+    """
+    Extract model identifiers from configuration for caching purposes.
+    Returns tuple of (ocr_model, extraction_model)
+    """
+    ocr_model = "default_ocr"  # You can make this configurable
+    
+    # Extract extraction model from API model setting
+    api_model = config.get('api_model', 'gpt-4o-mini')
+    extraction_model = api_model
+    
+    return ocr_model, extraction_model
+
 if __name__ == "__main__":
     # For testing
     load_configuration()
     status = get_config_status()
     for var, info in status.items():
         print(f"{var}: {'✅' if info['set'] else '❌'} ({info['source']})")
+    
+    # Test parameter hashing
+    test_hash = generate_processing_params_hash(
+        ocr_correction_threshold=0.8,
+        api_model="gpt-4o-mini",
+        temperature=0.0
+    )
+    print(f"\nTest hash: {test_hash}")

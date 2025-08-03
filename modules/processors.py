@@ -16,7 +16,7 @@ import re
 
 # Load configuration using the configuration manager
 try:
-    from .config_manager import load_configuration
+    from .config_manager import load_configuration, generate_processing_params_hash, get_model_identifiers
     load_configuration()
     print("✅ Configuration loaded in processors.py")
 except Exception as e:
@@ -558,7 +558,8 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
     return final_artifacts
 
 
-def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tuple = None) -> List[Dict]:
+def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tuple = None,
+                                     config: dict = None) -> List[Dict]:
     """
     Process a document page by page with intelligent caching.
     
@@ -566,6 +567,7 @@ def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tu
         pdf_path: Path to the PDF document
         db_manager: Database manager instance
         page_range: Optional tuple (start_page, end_page) to process specific pages
+        config: Configuration dictionary containing model and processing parameters
     
     Returns:
         List of processed artifacts
@@ -573,9 +575,18 @@ def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tu
     try:
         logger.info(f"Starting page-by-page processing of {os.path.basename(pdf_path)}")
         
-        # Get already processed pages
-        processed_pages = db_manager.get_processed_pages(pdf_path)
-        logger.info(f"Already processed pages: {processed_pages}")
+        # Extract model information and processing parameters
+        config = config or {}
+        ocr_model, extraction_model = get_model_identifiers(config)
+        processing_params_hash = generate_processing_params_hash(
+            ocr_correction_threshold=config.get('ocr_correction_threshold'),
+            api_model=config.get('api_model'),
+            temperature=config.get('temperature'),
+            max_tokens=config.get('max_tokens')
+        )
+        
+        logger.info(f"Using models: OCR={ocr_model}, Extraction={extraction_model}")
+        logger.info(f"Processing parameters hash: {processing_params_hash}")
         
         # Extract text from PDF
         from .text_processing import extract_text_from_pdf
@@ -598,21 +609,22 @@ def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tu
         
         for page_num in pages_to_check:
             try:
-                # Check if page already processed
-                if db_manager.check_page_processed(pdf_path, page_num):
-                    logger.info(f"Page {page_num} already processed, retrieving from database...")
+                # Check if page already processed with current models and parameters
+                if db_manager.check_page_processed(pdf_path, page_num, ocr_model, 
+                                                 extraction_model, processing_params_hash):
+                    logger.info(f"Page {page_num} already processed with current models, retrieving from database...")
                     page_artifacts = db_manager.get_page_artifacts(pdf_path, page_num)
                     all_artifacts.extend(page_artifacts)
                     logger.info(f"Retrieved {len(page_artifacts)} artifacts from page {page_num}")
                     continue
                 
                 # Process the page
-                logger.info(f"Processing page {page_num}...")
+                logger.info(f"Processing page {page_num} with {ocr_model}/{extraction_model}...")
                 page_text = pages[page_num - 1]  # Convert to 0-based index
                 
                 # Extract artifacts from this page
                 from .extraction import extract_artifacts_from_page
-                page_artifacts = extract_artifacts_from_page(page_text, page_num)
+                page_artifacts = extract_artifacts_from_page(page_text, page_num, config)
                 
                 if page_artifacts:
                     # Add file metadata to each artifact
@@ -625,14 +637,27 @@ def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tu
                         artifact['source_page'] = page_num
                         artifact['source_document'] = file_name
                         
-                        # Save to database
-                        saved_artifact = db_manager.add_artifact(artifact, pdf_path)
+                        # Save to database with model information
+                        saved_artifact = db_manager.add_artifact(
+                            artifact, pdf_path, ocr_model, extraction_model, processing_params_hash
+                        )
                         if saved_artifact:
                             all_artifacts.append(saved_artifact)
+                    
+                    # Mark page as processed with model information
+                    db_manager.mark_page_processed(
+                        pdf_path, page_num, len(page_artifacts), 
+                        ocr_model, extraction_model, processing_params_hash
+                    )
                     
                     logger.info(f"Processed page {page_num}: found {len(page_artifacts)} artifacts")
                 else:
                     logger.info(f"Page {page_num}: no artifacts found")
+                    # Still mark as processed to avoid re-processing
+                    db_manager.mark_page_processed(
+                        pdf_path, page_num, 0, 
+                        ocr_model, extraction_model, processing_params_hash
+                    )
                 
             except Exception as e:
                 logger.error(f"Error processing page {page_num}: {e}")
