@@ -74,6 +74,9 @@ def get_config_status():
     """Get the current configuration status for debugging"""
     status = {}
     
+    # Get streamlit safely
+    st = get_streamlit()
+    
     vars_to_check = [
         'SUPABASE_URL', 'SUPABASE_ANON_KEY', 'ENABLE_SUPABASE',
         'OPENAI_API_KEY', 'MISTRAL_API_KEY', 'GOOGLE_API_KEY'
@@ -87,7 +90,7 @@ def get_config_status():
         }
         
         # Try to determine source
-        if hasattr(st, 'secrets'):
+        if st is not None and hasattr(st, 'secrets'):
             try:
                 if var in ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_KEY', 'ENABLE_SUPABASE']:
                     if st.secrets.get("database", {}).get(var):
