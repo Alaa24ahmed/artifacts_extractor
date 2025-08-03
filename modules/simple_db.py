@@ -96,8 +96,8 @@ class SimpleArtifactDB:
             "source_document": artifact_data.get("source_document", file_name),
             "name_validation": artifact_data.get("name_validation", ""),
             # Model tracking fields
-            "ocr_model": ocr_model or artifact_data.get("ocr_model", "default_ocr"),
-            "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o-mini"),
+            "ocr_model": ocr_model or artifact_data.get("ocr_model", "mistral-ocr"),
+            "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o"),
             "processing_params_hash": processing_params_hash or artifact_data.get("processing_params_hash", "")
         }
         
@@ -109,10 +109,18 @@ class SimpleArtifactDB:
         return self._hash_file(file_path)
     
     def add_artifact(self, artifact_data: dict, file_path: str = None,
-                   ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
-                   processing_params_hash: str = "") -> dict:
+                   ocr_model: str = None, extraction_model: str = None,
+                   processing_params_hash: str = None) -> dict:
         """Add a new artifact to the database with model tracking"""
         try:
+            # Set default values for backward compatibility
+            if ocr_model is None:
+                ocr_model = "mistral-ocr"
+            if extraction_model is None:
+                extraction_model = "gpt-4o-mini"
+            if processing_params_hash is None:
+                processing_params_hash = ""
+            
             # Map the artifact data to database schema
             db_data = self._map_artifact_to_db(artifact_data, file_path, 
                                              ocr_model, extraction_model, processing_params_hash)
@@ -133,6 +141,8 @@ class SimpleArtifactDB:
             
         except Exception as e:
             logger.error(f"Error adding artifact: {e}")
+            logger.error(f"Artifact data: {artifact_data}")
+            logger.error(f"File path: {file_path}")
             return {}
     
     def get_artifact(self, artifact_id: str) -> dict:
@@ -511,7 +521,7 @@ class SimpleArtifactDB:
         return hashlib.md5(params_str.encode()).hexdigest()
 
     def check_page_processed(self, file_path: str, page_number: int,
-                           ocr_model: str = "default_ocr", extraction_model: str = "gpt-4o-mini",
+                           ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o",
                            processing_params_hash: str = "") -> bool:
         """Check if a specific page has already been processed with specific models"""
         file_hash = self._calculate_file_hash(file_path)
@@ -542,8 +552,8 @@ class SimpleArtifactDB:
         return sorted(artifacts, key=lambda x: x.get("id", 0))
 
     def mark_page_processed(self, file_path: str, page_number: int, 
-                          artifact_count: int = 0, ocr_model: str = "default_ocr", 
-                          extraction_model: str = "gpt-4o-mini", processing_params_hash: str = ""):
+                          artifact_count: int = 0, ocr_model: str = "mistral-ocr", 
+                          extraction_model: str = "gpt-4o", processing_params_hash: str = ""):
         """Mark a specific page as processed with model information"""
         file_hash = self._calculate_file_hash(file_path)
         file_name = os.path.basename(file_path)

@@ -144,11 +144,11 @@ def get_model_identifiers(config):
     Extract model identifiers from configuration for caching purposes.
     Returns tuple of (ocr_model, extraction_model)
     """
-    ocr_model = "default_ocr"  # You can make this configurable
+    # Extract OCR model from config (can be GPT-4o, Gemini, Mistral OCR, etc.)
+    ocr_model = config.get('ocr_model', 'mistral-ocr')  # Default to Mistral OCR
     
     # Extract extraction model from API model setting
-    api_model = config.get('api_model', 'gpt-4o-mini')
-    extraction_model = api_model
+    extraction_model = config.get('extraction_model', config.get('api_model', 'gpt-4o-mini'))
     
     return ocr_model, extraction_model
 
