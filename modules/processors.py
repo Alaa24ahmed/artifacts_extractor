@@ -2,6 +2,8 @@
 import os
 import json
 import logging
+import hashlib
+from typing import List, Dict, Optional, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 from .image_processing import extract_images_from_pdf, prepare_input_image
@@ -25,6 +27,30 @@ except Exception as e:
     load_dotenv(env_path, override=True)
 
 logger = logging.getLogger(__name__)
+
+def _calculate_file_hash(file_path: str) -> str:
+    """Calculate MD5 hash of a file"""
+    hash_md5 = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(4096), b""):
+            hash_md5.update(chunk)
+    return hash_md5.hexdigest()
+
+def _add_file_metadata_to_artifacts(artifacts: list, file_path: str) -> list:
+    """Add file hash and name metadata to all artifacts"""
+    if not artifacts or not file_path:
+        return artifacts
+    
+    file_hash = _calculate_file_hash(file_path)
+    file_name = os.path.basename(file_path)
+    
+    for artifact in artifacts:
+        artifact['file_hash'] = file_hash
+        artifact['file_name'] = file_name
+        if 'source_document' not in artifact:
+            artifact['source_document'] = file_name
+    
+    return artifacts
 
 def process_english_document(input_file, output_dir, model, start_page=1, end_page=None, 
                             correction_threshold=0.05, ocr_prompt=None, correction_prompt=None, 
@@ -122,6 +148,9 @@ def process_english_document(input_file, output_dir, model, start_page=1, end_pa
     
     # Save all artifacts
     if all_artifacts:
+        # Add file metadata to all artifacts
+        all_artifacts = _add_file_metadata_to_artifacts(all_artifacts, input_file)
+        
         all_artifacts_file = os.path.join(results_dir, "english_artifacts.json")
         with open(all_artifacts_file, 'w', encoding='utf-8') as f:
             json.dump(all_artifacts, f, indent=2, ensure_ascii=False)
@@ -519,7 +548,166 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
     )
     
     # Save to database cache
-    if db.save_artifacts(en_file, final_artifacts):
-        logger.info("💾 Results saved to database cache")
+    if final_artifacts:
+        # Ensure file metadata is present
+        final_artifacts = _add_file_metadata_to_artifacts(final_artifacts, en_file)
+        
+        if db.save_artifacts(en_file, final_artifacts):
+            logger.info("💾 Results saved to database cache")
     
     return final_artifacts
+
+
+def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tuple = None) -> List[Dict]:
+    """
+    Process a document page by page with intelligent caching.
+    
+    Args:
+        pdf_path: Path to the PDF document
+        db_manager: Database manager instance
+        page_range: Optional tuple (start_page, end_page) to process specific pages
+    
+    Returns:
+        List of processed artifacts
+    """
+    try:
+        logger.info(f"Starting page-by-page processing of {os.path.basename(pdf_path)}")
+        
+        # Get already processed pages
+        processed_pages = db_manager.get_processed_pages(pdf_path)
+        logger.info(f"Already processed pages: {processed_pages}")
+        
+        # Extract text from PDF
+        from .text_processing import extract_text_from_pdf
+        pages = extract_text_from_pdf(pdf_path)
+        
+        # Determine which pages to process
+        total_pages = len(pages)
+        if page_range:
+            start_page, end_page = page_range
+            start_page = max(1, start_page)
+            end_page = min(total_pages, end_page)
+            pages_to_check = list(range(start_page, end_page + 1))
+        else:
+            pages_to_check = list(range(1, total_pages + 1))
+        
+        logger.info(f"Total pages in document: {total_pages}")
+        logger.info(f"Pages to check: {pages_to_check}")
+        
+        all_artifacts = []
+        
+        for page_num in pages_to_check:
+            try:
+                # Check if page already processed
+                if db_manager.check_page_processed(pdf_path, page_num):
+                    logger.info(f"Page {page_num} already processed, retrieving from database...")
+                    page_artifacts = db_manager.get_page_artifacts(pdf_path, page_num)
+                    all_artifacts.extend(page_artifacts)
+                    logger.info(f"Retrieved {len(page_artifacts)} artifacts from page {page_num}")
+                    continue
+                
+                # Process the page
+                logger.info(f"Processing page {page_num}...")
+                page_text = pages[page_num - 1]  # Convert to 0-based index
+                
+                # Extract artifacts from this page
+                from .extraction import extract_artifacts_from_page
+                page_artifacts = extract_artifacts_from_page(page_text, page_num)
+                
+                if page_artifacts:
+                    # Add file metadata to each artifact
+                    file_hash = db_manager._calculate_file_hash(pdf_path)
+                    file_name = os.path.basename(pdf_path)
+                    
+                    for artifact in page_artifacts:
+                        artifact['file_hash'] = file_hash
+                        artifact['file_name'] = file_name
+                        artifact['source_page'] = page_num
+                        artifact['source_document'] = file_name
+                        
+                        # Save to database
+                        saved_artifact = db_manager.add_artifact(artifact, pdf_path)
+                        if saved_artifact:
+                            all_artifacts.append(saved_artifact)
+                    
+                    logger.info(f"Processed page {page_num}: found {len(page_artifacts)} artifacts")
+                else:
+                    logger.info(f"Page {page_num}: no artifacts found")
+                
+            except Exception as e:
+                logger.error(f"Error processing page {page_num}: {e}")
+                continue
+        
+        logger.info(f"Completed processing. Total artifacts: {len(all_artifacts)}")
+        return all_artifacts
+        
+    except Exception as e:
+        logger.error(f"Error in page-by-page processing: {e}")
+        return []
+
+
+def get_document_processing_status(pdf_path: str, db_manager) -> Dict:
+    """
+    Get the processing status of a document showing which pages are done.
+    
+    Returns:
+        Dictionary with processing status information
+    """
+    try:
+        from .text_processing import extract_text_from_pdf
+        pages = extract_text_from_pdf(pdf_path)
+        total_pages = len(pages)
+        
+        processed_pages = db_manager.get_processed_pages(pdf_path)
+        unprocessed_pages = [p for p in range(1, total_pages + 1) if p not in processed_pages]
+        
+        # Get artifact counts per page
+        page_artifact_counts = {}
+        for page_num in processed_pages:
+            artifacts = db_manager.get_page_artifacts(pdf_path, page_num)
+            page_artifact_counts[page_num] = len(artifacts)
+        
+        status = {
+            'file_name': os.path.basename(pdf_path),
+            'total_pages': total_pages,
+            'processed_pages': processed_pages,
+            'unprocessed_pages': unprocessed_pages,
+            'completion_percentage': (len(processed_pages) / total_pages) * 100 if total_pages > 0 else 0,
+            'page_artifact_counts': page_artifact_counts,
+            'total_artifacts': sum(page_artifact_counts.values())
+        }
+        
+        return status
+        
+    except Exception as e:
+        logger.error(f"Error getting document status: {e}")
+        return {}
+
+
+def continue_document_processing(pdf_path: str, db_manager) -> List[Dict]:
+    """
+    Continue processing a document from where it left off.
+    Only processes unprocessed pages.
+    """
+    try:
+        status = get_document_processing_status(pdf_path, db_manager)
+        unprocessed_pages = status.get('unprocessed_pages', [])
+        
+        if not unprocessed_pages:
+            logger.info(f"Document {os.path.basename(pdf_path)} is already fully processed")
+            # Return all existing artifacts
+            return db_manager.get_artifacts_by_file(db_manager._calculate_file_hash(pdf_path))
+        
+        logger.info(f"Continuing processing for pages: {unprocessed_pages}")
+        
+        # Process only unprocessed pages
+        if unprocessed_pages:
+            start_page = min(unprocessed_pages)
+            end_page = max(unprocessed_pages)
+            return process_document_with_page_caching(pdf_path, db_manager, (start_page, end_page))
+        
+        return []
+        
+    except Exception as e:
+        logger.error(f"Error continuing document processing: {e}")
+        return []
