@@ -723,16 +723,17 @@ def cross_language_validation_prompt(artifacts_list):
 
         ## **OUTPUT FORMAT:**
 
-        Return a JSON array with these fields for each artifact:
+        Return a JSON array with ALL the original fields for each artifact, including:
         - Name_EN: Validated/completed English name
-        - Name_AR: Validated/completed Arabic name
+        - Name_AR: Validated/completed Arabic name  
         - Name_FR: Validated/completed French name
         - Name_validation: One of these values:
           - "all_extracted": All names were extracted and consistent
           - "fixed_[lang]": The [lang] name was fixed based on domain expertise
           - "generated_[lang1]_[lang2]": The [lang1] and [lang2] names were generated
+        - Preserve ALL other metadata fields exactly as provided (Creator, Creation Date, Materials, Origin, Description, Category, source_page, source_document, etc.)
 
-        Return only these fields. Do not include other metadata fields.
+        IMPORTANT: Include all original metadata fields in your response. Do not remove any fields from the input data.
         """
     
     return prompt

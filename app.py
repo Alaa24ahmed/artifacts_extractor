@@ -190,15 +190,17 @@ st.markdown("""
         background-color: #f8f9fa;
         border: 1px solid #dee2e6;
         border-radius: 5px;
-        padding: 10px;
+        padding: 15px;
         font-family: monospace;
-        font-size: 12px;
-        height: 300px;
-        min-height: 300px;
+        font-size: 13px;
+        height: 600px;
+        min-height: 600px;
+        max-height: 80vh;
         overflow-y: auto;
         white-space: pre-wrap;
         word-wrap: break-word;
-        line-height: 1.5;
+        line-height: 1.4;
+        resize: vertical;
     }
     .button-container {
         display: flex;
@@ -516,7 +518,8 @@ def process_documents(doc_group, output_dir, model, start_page, end_page,
             prompts=prompts,
             csv_fields=csv_fields,
             ocr_model=ocr_model,
-            extraction_model=extraction_model
+            extraction_model=extraction_model,
+            save_to_db=False  # Disable automatic saving, only save when button is pressed
         )
         
         # Find the actual results directory by explicitly looking for the multilingual file
@@ -795,14 +798,27 @@ def display_results(output_dir=None):
             # Create DataFrame
             df = pd.DataFrame(artifacts)
             
-            # Reorder columns to show names first
-            name_cols = [col for col in df.columns if col.startswith("Name_")]
-            other_cols = [col for col in df.columns if not col.startswith("Name_")]
-            columns = name_cols + other_cols
+            # Filter out caching-related and internal fields
+            cache_related_fields = [
+                'file_hash', 'processing_params_hash', 'page_cache_key',
+                'ocr_model', 'extraction_model', 'created_at', 'updated_at', 'id'
+            ]
             
-            # Only use columns that exist in the dataframe
-            valid_columns = [col for col in columns if col in df.columns]
-            df = df[valid_columns]
+            # Keep only relevant columns for display
+            display_columns = [col for col in df.columns if col not in cache_related_fields]
+            df = df[display_columns]
+            
+            # Reorder columns to show names first, then metadata
+            name_cols = [col for col in df.columns if col.startswith("Name_")]
+            metadata_cols = [col for col in df.columns if col in ["Creator", "Creation Date", "Materials", "Origin", "Description", "Category"]]
+            source_cols = [col for col in df.columns if col.startswith("source_")]
+            other_cols = [col for col in df.columns if col not in name_cols + metadata_cols + source_cols]
+            
+            # Create the complete column order (names, metadata, source info, then everything else)
+            ordered_columns = name_cols + metadata_cols + source_cols + other_cols
+            
+            # Reorder the dataframe with filtered columns
+            df = df[ordered_columns]
             
             # Add search functionality
             search_term = st.text_input("🔍 Search artifacts", placeholder="Enter search term...", label_visibility="visible")
@@ -914,8 +930,6 @@ def display_results(output_dir=None):
                                             break
                                 
                                 if results_file:
-                                    file_name = os.path.basename(results_file).replace('.json', '')
-                                    
                                     # Load and save artifacts
                                     with open(results_file, 'r', encoding='utf-8') as f:
                                         artifacts_data = json.load(f)
@@ -945,25 +959,43 @@ def display_results(output_dir=None):
                                     # Save to database
                                     with st.spinner("Saving to database..."):
                                         try:
-                                            success = db.save_artifacts_from_data(file_name, file_hash, artifacts_data)
+                                            # Group artifacts by page for proper saving
+                                            artifacts_by_page = {}
+                                            for artifact in artifacts_data:
+                                                page_num = artifact.get("source_page", 1)
+                                                if page_num not in artifacts_by_page:
+                                                    artifacts_by_page[page_num] = []
+                                                artifacts_by_page[page_num].append(artifact)
                                             
-                                            if success:
-                                                # Calculate artifact count based on data type
-                                                if isinstance(artifacts_data, list):
-                                                    artifact_count = len(artifacts_data)
-                                                elif isinstance(artifacts_data, dict):
-                                                    artifact_count = len(artifacts_data.get('artifacts', []))
-                                                else:
-                                                    artifact_count = 0
-                                                
-                                                st.success(f"✅ Successfully saved {artifact_count} artifacts to database!")
+                                            # Save each page separately with default parameters
+                                            doc_group = {"EN": f"imported_file_{file_hash[:8]}.pdf"}
+                                            default_model = "gpt-4o"
+                                            default_thresholds = {"EN": 0.05, "AR": 0.10, "FR": 0.07}
+                                            
+                                            total_saved = 0
+                                            for page_num, page_artifacts in artifacts_by_page.items():
+                                                success = db.save_page_artifacts(
+                                                    doc_group, page_num, page_artifacts,
+                                                    default_model, default_model, default_thresholds
+                                                )
+                                                if success:
+                                                    total_saved += len(page_artifacts)
+                                            
+                                            if total_saved > 0:
+                                                st.success(f"✅ Successfully saved {total_saved} artifacts to database!")
                                                 st.info(f"📁 Saved from: {os.path.basename(results_file)}")
+                                                
+                                                # Save run statistics
+                                                db.save_run_statistics(
+                                                    doc_group, 1, len(artifacts_by_page), 
+                                                    default_model, default_model, default_thresholds,
+                                                    total_saved, 0, len(artifacts_by_page)
+                                                )
                                             else:
                                                 st.error("❌ Failed to save artifacts to database.")
                                                 # Debug info
                                                 st.markdown("**🔍 Debug Info:**")
                                                 st.code(f"Database enabled: {db.enabled}")
-                                                st.code(f"File name: {file_name}")
                                                 st.code(f"File hash: {file_hash[:20]}...")
                                                 if isinstance(artifacts_data, list):
                                                     st.code(f"Artifacts count: {len(artifacts_data)}")
@@ -1407,6 +1439,10 @@ def main():
         else:
             st.markdown('<div class="main-button">', unsafe_allow_html=True)
             if st.button("▶️ Start Processing", disabled=process_disabled, use_container_width=True, key="start_button"):
+                # Clear previous logs and timer display from UI
+                if 'log_output' in st.session_state:
+                    st.session_state.log_output = ""
+                
                 # Reset any previous completion marker and results path
                 if os.path.exists(COMPLETION_MARKER):
                     os.remove(COMPLETION_MARKER)
@@ -1587,7 +1623,7 @@ def main():
                 # Display logs based on auto-scroll setting
                 if auto_scroll:
                     # Create a scrollable iframe that always stays at the bottom
-                    log_height = 500
+                    log_height = 600  # Increased for better visibility
                     st.markdown(f"""
                     <div style="height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
                         <iframe srcdoc='
@@ -1596,7 +1632,7 @@ def main():
                                 <style>
                                     html, body {{
                                         height: 100%;
-                                        min-height: 300px;
+                                        min-height: 600px;
                                         margin: 0;
                                         padding: 0;
                                         overflow: hidden;
@@ -1703,7 +1739,7 @@ def main():
                 logs_html = get_latest_logs(200)  # Show more logs when completed
                 
                 # Use iframe for consistent log display
-                log_height = 300
+                log_height = 600  # Increased from 300 to 600 for better visibility
                 st.markdown(f"""
                 <div style="height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
                     <iframe srcdoc='
@@ -1712,7 +1748,7 @@ def main():
                             <style>
                                 html, body {{
                                     height: 100%;
-                                    min-height: 300px;
+                                    min-height: 600px;
                                     margin: 0;
                                     padding: 0;
                                     overflow: hidden;
@@ -1770,7 +1806,7 @@ def main():
                 logs_html = get_latest_logs(200)  # Show more logs for error diagnosis
                 
                 # Use iframe for consistent log display
-                log_height = 300
+                log_height = 600  # Increased for better error log visibility
                 st.markdown(f"""
                 <div style="height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
                     <iframe srcdoc='
@@ -1779,7 +1815,7 @@ def main():
                             <style>
                                 html, body {{
                                     height: 100%;
-                                    min-height: 300px;
+                                    min-height: 600px;
                                     margin: 0;
                                     padding: 0;
                                     overflow: hidden;

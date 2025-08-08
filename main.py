@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--extraction_model", default="gpt-4o",
                         choices=["gpt-4", "gpt-4o", "gpt-4o-mini", "gemini"],
                         help="Specific model to use for artifact extraction (if different from primary model)")
+    parser.add_argument("--no_auto_save", action="store_true",
+                        help="Disable automatic saving to database (manual save required)")
 
     args = parser.parse_args()
     
@@ -147,7 +149,8 @@ def main():
             prompts=prompts,
             csv_fields=MULTILINGUAL_CSV_FIELDS,
             ocr_model=ocr_model,
-            extraction_model=extraction_model
+            extraction_model=extraction_model,
+            save_to_db=not args.no_auto_save  # Save to DB unless --no_auto_save is specified
         )
         
     # If input files provided, process those
@@ -180,7 +183,8 @@ def main():
                 prompts=prompts,
                 csv_fields=MULTILINGUAL_CSV_FIELDS,
                 ocr_model=ocr_model,
-                extraction_model=extraction_model
+                extraction_model=extraction_model,
+                save_to_db=not args.no_auto_save  # Save to DB unless --no_auto_save is specified
             )
     
     # Otherwise search the data directory for documents
@@ -223,7 +227,8 @@ def main():
                 prompts=prompts,
                 csv_fields=MULTILINGUAL_CSV_FIELDS,
                 ocr_model=ocr_model,
-                extraction_model=extraction_model
+                extraction_model=extraction_model,
+                save_to_db=not args.no_auto_save  # Save to DB unless --no_auto_save is specified
             )
 
 if __name__ == "__main__":

@@ -5,7 +5,6 @@ import os
 import json
 import hashlib
 import logging
-import shelve
 from typing import List, Dict, Optional
 from datetime import datetime
 from dotenv import load_dotenv
@@ -13,7 +12,7 @@ from pathlib import Path
 
 # Load configuration using the configuration manager
 try:
-    from .config_manager import load_configuration, generate_processing_params_hash, get_model_identifiers
+    from .config_manager import load_configuration
     load_configuration()
     print("✅ Configuration loaded in simple_db.py")
 except Exception as e:
@@ -28,11 +27,9 @@ logger = logging.getLogger(__name__)
 class SimpleArtifactDB:
     """Simple database client for artifact storage and caching"""
     
-    def __init__(self, db_path: str = None):
-        self.db_path = db_path or "artifacts.db"
-        self.db = shelve.open(self.db_path, writeback=True)
-        self.cache_db = shelve.open(f"{self.db_path}_cache", writeback=True)
-        self.page_cache_db = shelve.open(f"{self.db_path}_page_cache", writeback=True)
+    def __init__(self):
+        self.supabase_client = None
+        self.enabled = False
         
         # Try to initialize Supabase
         try:
@@ -67,276 +64,305 @@ class SimpleArtifactDB:
         except Exception as e:
             logger.error(f"Error hashing file {file_path}: {e}")
             return ""
-
-    def _map_artifact_to_db(self, artifact_data: dict, file_path: str = None,
-                           ocr_model: str = None, extraction_model: str = None,
-                           processing_params_hash: str = None) -> dict:
-        """Map artifact data to match the new database schema"""
-        # Calculate file hash and name if file_path provided
-        file_hash = ""
-        file_name = ""
-        if file_path:
-            file_hash = self._hash_file(file_path)
-            # Use the original filename as uploaded (English document name)
-            file_name = os.path.basename(file_path)
-            # Keep the original filename with extension for English documents
-        
-        # Map old field names to new schema
-        mapped_data = {
-            "file_hash": artifact_data.get("file_hash", file_hash),
-            "file_name": artifact_data.get("file_name", file_name),
-            "name_en": artifact_data.get("Name_EN", artifact_data.get("name_english", artifact_data.get("name", artifact_data.get("Name", "")))),
-            "name_ar": artifact_data.get("Name_AR", artifact_data.get("name_arabic", "")),
-            "name_fr": artifact_data.get("Name_FR", artifact_data.get("name_french", "")),
-            "creator": artifact_data.get("creator", artifact_data.get("Creator", "")),
-            "creation_date": artifact_data.get("Creation Date", artifact_data.get("period", artifact_data.get("creation_date", ""))),
-            "materials": artifact_data.get("materials", artifact_data.get("Materials", artifact_data.get("material", ""))),
-            "origin": artifact_data.get("origin", artifact_data.get("Origin", "")),
-            "description": artifact_data.get("description", artifact_data.get("Description", "")),
-            "category": artifact_data.get("category", artifact_data.get("Category", "")),
-            "source_page": artifact_data.get("page_number", artifact_data.get("source_page", 0)),
-            "name_validation": artifact_data.get("Name_validation", artifact_data.get("name_validation", "")),
-            # Model tracking fields
-            "ocr_model": ocr_model or artifact_data.get("ocr_model", "mistral-ocr"),
-            "extraction_model": extraction_model or artifact_data.get("extraction_model", "gpt-4o"),
-            "processing_params_hash": processing_params_hash or artifact_data.get("processing_params_hash", "")
-        }
-        
-        # Remove None values and empty strings for optional fields
-        return {k: v for k, v in mapped_data.items() if v is not None and (k in ["file_hash", "file_name"] or v != "")}
     
-    def _calculate_file_hash(self, file_path: str) -> str:
-        """Calculate MD5 hash of a file (alias for _hash_file for compatibility)"""
-        return self._hash_file(file_path)
-    
-    def add_artifact(self, artifact_data: dict, file_path: str = None,
-                   ocr_model: str = None, extraction_model: str = None,
-                   processing_params_hash: str = None) -> dict:
-        """Add a new artifact to the database with model tracking"""
+    def check_page_level_cache(self, doc_group: dict, start_page: int, end_page: int,
+                              ocr_model: str, extraction_model: str, thresholds: dict) -> tuple:
+        """
+        Check cache for each page in the requested range
+        
+        Returns:
+            tuple: (cached_artifacts, missing_pages, cache_stats)
+        """
+        if not self.enabled:
+            return [], list(range(start_page, end_page + 1)), {"cached_pages": 0, "missing_pages": end_page - start_page + 1}
+        
+        # Validate inputs
+        if not doc_group or not doc_group.get("EN"):
+            logger.error("Invalid doc_group - missing English document")
+            return [], list(range(start_page, end_page + 1)), {"cached_pages": 0, "missing_pages": end_page - start_page + 1}
+        
+        if start_page > end_page:
+            logger.error(f"Invalid page range: {start_page} > {end_page}")
+            return [], [], {"cached_pages": 0, "missing_pages": 0}
+            
         try:
-            # Set default values for backward compatibility
-            if ocr_model is None:
-                ocr_model = "mistral-ocr"
-            if extraction_model is None:
-                extraction_model = "gpt-4o-mini"
-            if processing_params_hash is None:
-                processing_params_hash = ""
+            requested_pages = list(range(start_page, end_page + 1))
+            cached_artifacts = []
+            missing_pages = []
             
-            # Map the artifact data to database schema
-            db_data = self._map_artifact_to_db(artifact_data, file_path, 
-                                             ocr_model, extraction_model, processing_params_hash)
+            # Create processing params hash
+            processing_params_hash = hashlib.sha256(
+                json.dumps(thresholds, sort_keys=True).encode()
+            ).hexdigest()
             
-            # Generate unique ID
-            artifact_id = str(len(self.db) + 1)
-            db_data['id'] = artifact_id
+            logger.info(f"🔍 Checking cache for pages {start_page}-{end_page}")
             
-            # Add timestamps
-            db_data['created_at'] = datetime.now().isoformat()
-            db_data['updated_at'] = datetime.now().isoformat()
+            for page_num in requested_pages:
+                # Create page cache key
+                page_cache_key = self._create_page_cache_key(
+                    doc_group, page_num, ocr_model, extraction_model, thresholds
+                )
+                
+                # Check if this page exists in cache
+                try:
+                    result = self.supabase_client.rpc("check_page_cache", {
+                        "p_page_cache_key": page_cache_key
+                    }).execute()
+                except Exception as rpc_error:
+                    logger.warning(f"RPC call failed for page {page_num}, falling back to direct query: {rpc_error}")
+                    # Fallback to direct table query
+                    result = self.supabase_client.table("artifacts").select("*").eq(
+                        "page_cache_key", page_cache_key
+                    ).execute()
+                
+                if result.data:
+                    # Convert database format back to original format
+                    page_artifacts = []
+                    for record in result.data:
+                        artifact = {
+                            "Name_EN": record.get("name_en", ""),
+                            "Name_AR": record.get("name_ar", ""),
+                            "Name_FR": record.get("name_fr", ""),
+                            "Creator": record.get("creator", ""),
+                            "Creation Date": record.get("creation_date", ""),
+                            "Materials": record.get("materials", ""),
+                            "Origin": record.get("origin", ""),
+                            "Description": record.get("description", ""),
+                            "Category": record.get("category", ""),
+                            "source_page": record.get("source_page", page_num),
+                            "source_document": record.get("source_document", ""),
+                            "Name_validation": record.get("name_validation", "")
+                        }
+                        page_artifacts.append(artifact)
+                    
+                    cached_artifacts.extend(page_artifacts)
+                    logger.info(f"✅ Page {page_num}: Found {len(page_artifacts)} cached artifacts")
+                else:
+                    missing_pages.append(page_num)
+                    logger.info(f"🔄 Page {page_num}: Needs processing")
             
-            # Save to local database
-            self.db[artifact_id] = db_data
+            cache_stats = {
+                "cached_pages": len(requested_pages) - len(missing_pages),
+                "missing_pages": len(missing_pages),
+                "total_cached_artifacts": len(cached_artifacts)
+            }
             
-            logger.info(f"Added artifact with ID: {artifact_id} using {ocr_model}/{extraction_model}")
-            return db_data
+            logger.info(f"📊 Cache Summary: {cache_stats['cached_pages']} cached, {cache_stats['missing_pages']} need processing")
+            
+            return cached_artifacts, missing_pages, cache_stats
             
         except Exception as e:
-            logger.error(f"Error adding artifact: {e}")
-            logger.error(f"Artifact data: {artifact_data}")
-            logger.error(f"File path: {file_path}")
-            return {}
+            logger.error(f"Error checking page-level cache: {e}")
+            # Fallback: treat all pages as missing
+            return [], list(range(start_page, end_page + 1)), {"cached_pages": 0, "missing_pages": end_page - start_page + 1}
+    
+    def _create_page_cache_key(self, doc_group: dict, page_num: int, ocr_model: str, 
+                              extraction_model: str, thresholds: dict) -> str:
+        """Create unique cache key for a specific page with specific parameters"""
+        # Create file hashes for all documents
+        file_hashes = {}
+        for lang, file_path in doc_group.items():
+            if file_path and os.path.exists(file_path):
+                file_hashes[lang] = self._hash_file(file_path)
+        
+        # Create parameter combination
+        params = {
+            'files': file_hashes,
+            'page': page_num,
+            'ocr_model': ocr_model,
+            'extraction_model': extraction_model,
+            'thresholds': json.dumps(thresholds, sort_keys=True)
+        }
+        
+        # Generate SHA-256 hash
+        params_str = json.dumps(params, sort_keys=True)
+        cache_key = hashlib.sha256(params_str.encode()).hexdigest()
+        
+        # Debug logging
+        logger.debug(f"Created page cache key for page {page_num}: {cache_key[:16]}...")
+        logger.debug(f"Parameters: {params_str[:100]}...")
+        
+        return cache_key
+    
+    def _create_run_cache_key(self, doc_group: dict, start_page: int, end_page: int,
+                             ocr_model: str, extraction_model: str, thresholds: dict) -> str:
+        """Create unique cache key for an entire processing run"""
+        # Get main English file hash
+        en_file = doc_group.get("EN")
+        file_hash = self._hash_file(en_file) if en_file else ""
+        
+        # If we can't hash the original file, generate a content-based fallback for caching
+        if not file_hash:
+            # For caching purposes, we need a deterministic hash based on document identity
+            file_basename = os.path.basename(en_file) if en_file else "unknown_document"
+            # Remove the random prefix that Streamlit adds, keep the core identifier
+            if file_basename.startswith("imported_file_"):
+                core_name = file_basename.replace("imported_file_", "")
+            else:
+                core_name = file_basename
+            
+            file_hash = hashlib.sha256(core_name.encode()).hexdigest()
+        
+        params = {
+            'file_hash': file_hash,
+            'start_page': start_page,
+            'end_page': end_page,
+            'ocr_model': ocr_model,
+            'extraction_model': extraction_model,
+            'thresholds': json.dumps(thresholds, sort_keys=True)
+        }
+        
+        params_str = json.dumps(params, sort_keys=True)
+        return hashlib.sha256(params_str.encode()).hexdigest()
+    
+    def _map_artifact_to_new_schema(self, artifact: dict, page_cache_key: str, 
+                                   page_num: int, ocr_model: str, extraction_model: str,
+                                   processing_params_hash: str) -> dict:
+        """Map artifact fields from old format to new schema with cache keys"""
+        return {
+            "page_cache_key": page_cache_key,
+            "page_number": page_num,
+            "name_en": artifact.get("Name_EN", artifact.get("Name", "")),
+            "name_ar": artifact.get("Name_AR", ""),
+            "name_fr": artifact.get("Name_FR", ""),
+            "creator": artifact.get("Creator", ""),
+            "creation_date": artifact.get("Creation Date", ""),
+            "materials": artifact.get("Materials", ""),
+            "origin": artifact.get("Origin", ""),
+            "description": artifact.get("Description", ""),
+            "category": artifact.get("Category", ""),
+            "source_page": artifact.get("source_page", page_num),
+            "source_document": artifact.get("source_document", ""),
+            "name_validation": artifact.get("Name_validation", ""),
+            "ocr_model": ocr_model,
+            "extraction_model": extraction_model,
+            "processing_params_hash": processing_params_hash
+        }
 
-    def mark_file_processed(self, file_path: str, artifact_count: int = 0,
-                          ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o",
-                          processing_params_hash: str = ""):
-        """Mark a file as processed in cache with model information"""
+    def save_page_artifacts(self, doc_group: dict, page_num: int, artifacts: List[Dict],
+                          ocr_model: str, extraction_model: str, thresholds: dict) -> bool:
+        """Save artifacts from a specific page with cache key"""
+        if not self.enabled or not artifacts:
+            return False
+            
+        # Debug: Log the models being saved
+        logger.info(f"💾 DB Save - OCR model: '{ocr_model}', Extraction model: '{extraction_model}'")
+            
         try:
-            file_hash = self._hash_file(file_path) if file_path and os.path.exists(file_path) else file_path
-            # Use original filename as uploaded (English document name)
-            file_name = os.path.basename(file_path) if file_path else "unknown"
+            # Get main file hash
+            en_file = doc_group.get("EN", "")
+            file_hash = self._hash_file(en_file) if en_file else ""
             
-            cache_key = f"cache_{file_hash}_{ocr_model}_{extraction_model}_{processing_params_hash}"
+            # If we can't hash the original file (e.g., temporary file no longer exists),
+            # we need a content-based fallback for caching to work properly
+            if not file_hash:
+                # For caching purposes, we need a deterministic hash based on document identity
+                # Use the original filename (which contains unique ID) as the basis
+                # This allows cache hits when same document is re-uploaded
+                file_basename = os.path.basename(en_file) if en_file else "unknown_document"
+                # Remove the random prefix that Streamlit adds, keep the core identifier
+                if file_basename.startswith("imported_file_"):
+                    # Extract the unique part: imported_file_0e6834e5.pdf -> 0e6834e5.pdf
+                    core_name = file_basename.replace("imported_file_", "")
+                else:
+                    core_name = file_basename
+                
+                file_hash = hashlib.sha256(core_name.encode()).hexdigest()
+                logger.warning(f"Using content-based fallback hash for caching: {core_name}")
             
-            cache_data = {
+            if not file_hash:
+                logger.error("Cannot create file hash for page artifacts")
+                return False
+            
+            # Create cache keys
+            page_cache_key = self._create_page_cache_key(
+                doc_group, page_num, ocr_model, extraction_model, thresholds
+            )
+            processing_params_hash = hashlib.sha256(
+                json.dumps(thresholds, sort_keys=True).encode()
+            ).hexdigest()
+            
+            # Check if this page is already cached
+            existing_check = self.supabase_client.table("artifacts").select("id").eq(
+                "page_cache_key", page_cache_key
+            ).limit(1).execute()
+            
+            if existing_check.data:
+                logger.info(f"Page {page_num} already cached, skipping save")
+                return True
+            
+            # Map and save each artifact
+            saved_count = 0
+            for artifact in artifacts:
+                mapped_artifact = self._map_artifact_to_new_schema(
+                    artifact, page_cache_key, page_num, ocr_model, 
+                    extraction_model, processing_params_hash
+                )
+                
+                # Add file hash
+                mapped_artifact["file_hash"] = file_hash
+                
+                try:
+                    self.supabase_client.table("artifacts").insert(mapped_artifact).execute()
+                    saved_count += 1
+                except Exception as e:
+                    logger.error(f"Error saving individual artifact: {e}")
+                    continue
+            
+            logger.info(f"💾 Saved {saved_count} artifacts for page {page_num}")
+            return saved_count > 0
+            
+        except Exception as e:
+            logger.error(f"Error saving page artifacts: {e}")
+            return False
+
+    def save_run_statistics(self, doc_group: dict, start_page: int, end_page: int,
+                          ocr_model: str, extraction_model: str, thresholds: dict,
+                          total_artifacts: int, cached_pages: int, processed_pages: int) -> bool:
+        """Save statistics for a complete processing run"""
+        if not self.enabled:
+            return False
+            
+        try:
+            # Get main file hash
+            en_file = doc_group.get("EN", "")
+            file_hash = self._hash_file(en_file) if en_file else ""
+            
+            # Create run cache key
+            run_cache_key = self._create_run_cache_key(
+                doc_group, start_page, end_page, ocr_model, extraction_model, thresholds
+            )
+            processing_params_hash = hashlib.sha256(
+                json.dumps(thresholds, sort_keys=True).encode()
+            ).hexdigest()
+            
+            # Save run statistics
+            run_record = {
+                "run_cache_key": run_cache_key,
                 "file_hash": file_hash,
-                "file_name": file_name,
+                "start_page": start_page,
+                "end_page": end_page,
                 "ocr_model": ocr_model,
                 "extraction_model": extraction_model,
                 "processing_params_hash": processing_params_hash,
-                "artifact_count": artifact_count,
-                "processing_status": "completed",
-                "created_at": datetime.now().isoformat()
+                "total_artifacts": total_artifacts,
+                "cached_pages": cached_pages,
+                "processed_pages": processed_pages,
+                "processing_status": "completed"
             }
             
-            self.cache_db[cache_key] = cache_data
-            logger.info(f"Marked file {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
+            # Use upsert to avoid duplicates
+            result = self.supabase_client.table("processing_cache").upsert(run_record).execute()
+            
+            logger.info(f"📊 Saved run statistics: {total_artifacts} artifacts, {cached_pages} cached pages, {processed_pages} processed pages")
+            return True
             
         except Exception as e:
-            logger.error(f"Error marking file as processed: {e}")
-    
-    def get_artifact(self, artifact_id: str) -> dict:
-        """Get a single artifact by ID"""
-        try:
-            return self.db.get(str(artifact_id), {})
-        except Exception as e:
-            logger.error(f"Error getting artifact {artifact_id}: {e}")
-            return {}
-    
-    def update_artifact(self, artifact_id: str, updates: dict, file_path: str = None) -> dict:
-        """Update an existing artifact"""
-        try:
-            artifact_id = str(artifact_id)
-            if artifact_id in self.db:
-                current_data = self.db[artifact_id].copy()
-                current_data.update(updates)
-                
-                # Re-map to ensure schema compliance
-                mapped_data = self._map_artifact_to_db(current_data, file_path)
-                mapped_data['id'] = artifact_id
-                mapped_data['updated_at'] = datetime.now().isoformat()
-                
-                self.db[artifact_id] = mapped_data
-                logger.info(f"Updated artifact with ID: {artifact_id}")
-                return mapped_data
-            else:
-                logger.warning(f"Artifact {artifact_id} not found for update")
-                return {}
-                
-        except Exception as e:
-            logger.error(f"Error updating artifact {artifact_id}: {e}")
-            return {}
-    
-    def delete_artifact(self, artifact_id: str) -> bool:
-        """Delete an artifact"""
-        try:
-            artifact_id = str(artifact_id)
-            if artifact_id in self.db:
-                del self.db[artifact_id]
-                logger.info(f"Deleted artifact with ID: {artifact_id}")
-                return True
-            else:
-                logger.warning(f"Artifact {artifact_id} not found for deletion")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error deleting artifact {artifact_id}: {e}")
+            logger.error(f"Error saving run statistics: {e}")
             return False
-    
-    def list_artifacts(self, limit: int = 100, offset: int = 0) -> List[dict]:
-        """List artifacts with pagination"""
-        try:
-            all_artifacts = list(self.db.values())
-            # Sort by created_at (most recent first)
-            all_artifacts.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-            return all_artifacts[offset:offset+limit]
-        except Exception as e:
-            logger.error(f"Error listing artifacts: {e}")
-            return []
-    
-    def get_artifacts_by_file(self, file_hash: str) -> List[dict]:
-        """Get all artifacts from a specific file"""
-        try:
-            results = []
-            for artifact in self.db.values():
-                if artifact.get('file_hash') == file_hash:
-                    results.append(artifact)
-            
-            # Sort by source_page
-            results.sort(key=lambda x: x.get('source_page', 0))
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error getting artifacts by file: {e}")
-            return []
-    
-    def filter_artifacts(self, **filters) -> List[dict]:
-        """Filter artifacts by various criteria"""
-        try:
-            results = []
-            for artifact in self.db.values():
-                matches = True
-                for key, value in filters.items():
-                    if value is not None and artifact.get(key) != value:
-                        matches = False
-                        break
-                
-                if matches:
-                    results.append(artifact)
-            
-            return results
-            
-        except Exception as e:
-            logger.error(f"Error filtering artifacts: {e}")
-            return []
-    
-    def close(self):
-        """Close the database connections"""
-        try:
-            self.db.close()
-            self.cache_db.close()
-            self.page_cache_db.close()
-            logger.info("Database connections closed")
-        except Exception as e:
-            logger.error(f"Error closing database: {e}")
 
-    def check_cache(self, file_path: str) -> Optional[List[Dict]]:
-        """Check if artifacts exist for this file"""
-        if not self.enabled:
-            return None
-            
-        try:
-            file_hash = self._hash_file(file_path)
-            if not file_hash:
-                return None
-            
-            # Check cache table first
-            result = self.supabase_client.table("processing_cache").select("*").eq(
-                "file_hash", file_hash
-            ).execute()
-            
-            if not result.data:
-                return None
-            
-            # Get artifacts using the new schema
-            artifacts_result = self.supabase_client.table("artifacts").select("*").eq(
-                "file_hash", file_hash
-            ).order("source_page").execute()
-            
-            if artifacts_result.data:
-                # Convert database records back to artifact format
-                artifacts = []
-                for record in artifacts_result.data:
-                    artifact = {
-                        "id": record.get("id"),
-                        "Name": record.get("name_en", ""),
-                        "Name_EN": record.get("name_en", ""),
-                        "Name_AR": record.get("name_ar", ""),
-                        "Name_FR": record.get("name_fr", ""),
-                        "Creator": record.get("creator", ""),
-                        "Creation Date": record.get("creation_date", ""),
-                        "Materials": record.get("materials", ""),
-                        "Origin": record.get("origin", ""),
-                        "Description": record.get("description", ""),
-                        "Category": record.get("category", ""),
-                        "source_page": record.get("source_page", 0),
-                        "file_hash": record.get("file_hash", ""),
-                        "file_name": record.get("file_name", "")
-                    }
-                    artifacts.append(artifact)
-                
-                logger.info(f"🎯 Cache hit! Found {len(artifacts)} artifacts for {os.path.basename(file_path)}")
-                return artifacts
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error checking cache: {e}")
-            return None
-
-    def save_artifacts_from_data(self, file_name: str, file_hash: str, artifacts_data, 
-                               ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o", 
-                               processing_params_hash: str = "") -> bool:
-        """Save artifacts to database from JSON data using new schema"""
+    def save_artifacts_from_data(self, file_hash: str, artifacts_data) -> bool:
+        """Legacy method for backward compatibility - converts to page-based saving"""
         if not self.enabled:
             logger.warning("Database not enabled - cannot save artifacts")
             return False
@@ -360,88 +386,36 @@ class SimpleArtifactDB:
                 return False
             
             if not artifacts:
-                logger.warning(f"No artifacts found in data for {file_name}")
+                logger.warning(f"No artifacts found in data")
                 return False
             
-            logger.info(f"Attempting to save {len(artifacts)} artifacts for {file_name}")
-            
-            # Convert each artifact to the new schema and save individually
-            saved_count = 0
+            # Group artifacts by page for proper caching
+            artifacts_by_page = {}
             for artifact in artifacts:
-                try:
-                    # Save artifact with model tracking
-                    saved_artifact = self.add_artifact(
-                        artifact, 
-                        file_path=None,  # We already have file_hash and file_name
-                        ocr_model=ocr_model,
-                        extraction_model=extraction_model,
-                        processing_params_hash=processing_params_hash
-                    )
-                    
-                    if saved_artifact:
-                        saved_count += 1
-                except Exception as e:
-                    logger.error(f"Error saving individual artifact: {e}")
-                    continue
+                page_num = artifact.get("source_page", 1)
+                if page_num not in artifacts_by_page:
+                    artifacts_by_page[page_num] = []
+                artifacts_by_page[page_num].append(artifact)
             
-            if saved_count > 0:
-                # Mark file as processed in cache
-                self.mark_file_processed(
-                    file_name, saved_count, ocr_model, extraction_model, processing_params_hash
+            # Save each page separately (using default parameters for legacy data)
+            doc_group = {"EN": f"legacy_file_{file_hash[:8]}.pdf"}
+            default_model = "gpt-4o"
+            default_thresholds = {"EN": 0.05, "AR": 0.10, "FR": 0.07}
+            
+            total_saved = 0
+            for page_num, page_artifacts in artifacts_by_page.items():
+                success = self.save_page_artifacts(
+                    doc_group, page_num, page_artifacts,
+                    default_model, default_model, default_thresholds
                 )
-                logger.info(f"💾 Successfully saved {saved_count} artifacts for {file_name}")
-                return True
-            else:
-                logger.error(f"Failed to save any artifacts for {file_name}")
-                return False
+                if success:
+                    total_saved += len(page_artifacts)
+            
+            logger.info(f"💾 Successfully saved {total_saved} artifacts across {len(artifacts_by_page)} pages")
+            return total_saved > 0
             
         except Exception as e:
             logger.error(f"Error saving artifacts from data: {e}")
-            import traceback
-            logger.error(f"Traceback: {traceback.format_exc()}")
-            return False
-
-    def save_artifacts(self, file_path: str, artifacts: List[Dict]) -> bool:
-        """Save artifacts to database using new schema"""
-        if not self.enabled or not artifacts:
-            return False
-            
-        try:
-            file_hash = self._hash_file(file_path)
-            file_name = os.path.basename(file_path)
-            
-            if not file_hash:
-                return False
-            
-            # Convert and save each artifact individually
-            saved_count = 0
-            for artifact in artifacts:
-                try:
-                    mapped_artifact = self._map_artifact_to_db(artifact, file_path)
-                    result = self.supabase_client.table("artifacts").insert(mapped_artifact).execute()
-                    if result.data:
-                        saved_count += 1
-                except Exception as e:
-                    logger.error(f"Error saving individual artifact: {e}")
-                    continue
-            
-            if saved_count > 0:
-                # Save cache entry
-                cache_record = {
-                    "file_hash": file_hash,
-                    "file_name": file_name,
-                    "artifact_count": saved_count
-                }
-                
-                self.supabase_client.table("processing_cache").upsert(cache_record).execute()
-                logger.info(f"💾 Saved {saved_count} artifacts for {file_name}")
-                return True
-            else:
-                logger.error(f"Failed to save any artifacts for {file_name}")
-                return False
-            
-        except Exception as e:
-            logger.error(f"Error saving artifacts: {e}")
             return False
     
     def search_artifacts(self, query: str = None, limit: int = 100) -> List[Dict]:
@@ -450,37 +424,21 @@ class SimpleArtifactDB:
             return []
             
         try:
-            # Use the database function for search if available
+            # Use the database function for search
             if query:
-                try:
-                    result = self.supabase_client.rpc("search_artifacts", {
-                        "search_term": query,
-                        "limit_count": limit
-                    }).execute()
-                    return result.data if result.data else []
-                except Exception:
-                    # Fallback to manual search if RPC function not available
-                    query_builder = self.supabase_client.table("artifacts").select("*")
-                    query_builder = query_builder.or_(
-                        f"name_en.ilike.%{query}%,"
-                        f"name_ar.ilike.%{query}%,"
-                        f"name_fr.ilike.%{query}%,"
-                        f"description.ilike.%{query}%,"
-                        f"materials.ilike.%{query}%,"
-                        f"creator.ilike.%{query}%"
-                    )
-                    result = query_builder.limit(limit).execute()
+                result = self.supabase_client.rpc("search_artifacts", {
+                    "search_term": query,
+                    "limit_count": limit
+                }).execute()
             else:
                 result = self.supabase_client.table("artifacts").select("*").order(
                     "created_at", desc=True
                 ).limit(limit).execute()
             
-            # Convert database records back to artifact format
+            # Convert back to original format for compatibility
             artifacts = []
             for record in result.data:
                 artifact = {
-                    "id": record.get("id"),
-                    "Name": record.get("name_en", ""),
                     "Name_EN": record.get("name_en", ""),
                     "Name_AR": record.get("name_ar", ""),
                     "Name_FR": record.get("name_fr", ""),
@@ -490,9 +448,9 @@ class SimpleArtifactDB:
                     "Origin": record.get("origin", ""),
                     "Description": record.get("description", ""),
                     "Category": record.get("category", ""),
-                    "source_page": record.get("source_page", 0),
-                    "file_hash": record.get("file_hash", ""),
-                    "file_name": record.get("file_name", "")
+                    "source_page": record.get("source_page", record.get("page_number", "")),
+                    "source_document": record.get("source_document", ""),
+                    "Name_validation": record.get("name_validation", "")
                 }
                 artifacts.append(artifact)
             
@@ -504,115 +462,51 @@ class SimpleArtifactDB:
             return []
     
     def get_stats(self) -> Dict:
-        """Get database statistics using new schema"""
+        """Get database statistics using the new schema"""
         if not self.enabled:
             return {"enabled": False}
             
         try:
-            # Use the database function if available
+            # Use the enhanced statistics function
             try:
-                result = self.supabase_client.rpc("get_artifact_statistics").execute()
-                if result.data and len(result.data) > 0:
-                    stats = result.data[0]
-                    stats["enabled"] = True
-                    stats["last_updated"] = datetime.now().isoformat()
-                    return stats
-            except Exception:
-                # Fallback to manual counting
-                artifacts_result = self.supabase_client.table("artifacts").select(
-                    "id", count="exact"
+                stats_result = self.supabase_client.rpc("get_artifact_statistics").execute()
+            except Exception as rpc_error:
+                logger.warning(f"RPC call for statistics failed, falling back to simple counting: {rpc_error}")
+                stats_result = None
+            
+            if stats_result.data:
+                stats = stats_result.data[0]
+                return {
+                    "enabled": True,
+                    "total_artifacts": stats.get("total_artifacts", 0),
+                    "unique_runs": stats.get("unique_runs", 0),
+                    "unique_pages": stats.get("unique_pages", 0),
+                    "categories_count": stats.get("categories_count", 0),
+                    "creators_count": stats.get("creators_count", 0),
+                    "origins_count": stats.get("origins_count", 0),
+                    "unique_documents_count": stats.get("unique_documents_count", 0),
+                    "last_updated": datetime.now().isoformat()
+                }
+            else:
+                # Fallback to simple counting
+                artifacts_count = self.supabase_client.table("artifacts").select(
+                    "*", count="exact"
                 ).execute()
                 
-                cache_result = self.supabase_client.table("processing_cache").select(
-                    "file_hash", count="exact"
+                runs_count = self.supabase_client.table("processing_cache").select(
+                    "run_cache_key", count="exact"
                 ).execute()
                 
                 return {
                     "enabled": True,
-                    "total_artifacts": artifacts_result.count,
-                    "unique_files": cache_result.count,
+                    "total_artifacts": artifacts_count.count,
+                    "unique_runs": runs_count.count,
                     "last_updated": datetime.now().isoformat()
                 }
-            
+                
         except Exception as e:
             logger.error(f"Error getting stats: {e}")
             return {"enabled": True, "error": str(e)}
-
-    def _generate_processing_params_hash(self, model: str = "gpt-4o", **kwargs) -> str:
-        """Generate hash for processing parameters to enable cache invalidation"""
-        params = {
-            "model": model,
-            **kwargs
-        }
-        params_str = json.dumps(params, sort_keys=True)
-        return hashlib.md5(params_str.encode()).hexdigest()
-
-    def check_page_processed(self, file_path: str, page_number: int,
-                           ocr_model: str = "mistral-ocr", extraction_model: str = "gpt-4o",
-                           processing_params_hash: str = "") -> bool:
-        """Check if a specific page has already been processed with specific models"""
-        file_hash = self._calculate_file_hash(file_path)
-        cache_key = f"{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
-        
-        if cache_key in self.page_cache_db:
-            return True
-        
-        # Also check in artifacts table directly
-        for artifact in self.db.values():
-            if (artifact.get("file_hash") == file_hash and 
-                artifact.get("source_page") == page_number and
-                artifact.get("ocr_model") == ocr_model and
-                artifact.get("extraction_model") == extraction_model):
-                return True
-        return False
-
-    def get_page_artifacts(self, file_path: str, page_number: int) -> List[dict]:
-        """Get all artifacts for a specific page"""
-        file_hash = self._calculate_file_hash(file_path)
-        artifacts = []
-        
-        for artifact in self.db.values():
-            if (artifact.get("file_hash") == file_hash and 
-                artifact.get("source_page") == page_number):
-                artifacts.append(artifact)
-        
-        return sorted(artifacts, key=lambda x: x.get("id", 0))
-
-    def mark_page_processed(self, file_path: str, page_number: int, 
-                          artifact_count: int = 0, ocr_model: str = "mistral-ocr", 
-                          extraction_model: str = "gpt-4o", processing_params_hash: str = ""):
-        """Mark a specific page as processed with model information"""
-        file_hash = self._calculate_file_hash(file_path)
-        file_name = os.path.basename(file_path)
-        cache_key = f"{file_hash}_{page_number}_{ocr_model}_{extraction_model}_{processing_params_hash}"
-        
-        cache_data = {
-            "file_hash": file_hash,
-            "file_name": file_name,
-            "page_number": page_number,
-            "ocr_model": ocr_model,
-            "extraction_model": extraction_model,
-            "processing_params_hash": processing_params_hash,
-            "artifact_count": artifact_count,
-            "processing_status": "completed",
-            "created_at": datetime.now().isoformat()
-        }
-        
-        self.page_cache_db[cache_key] = cache_data
-        logger.info(f"Marked page {page_number} of {file_name} as processed with {artifact_count} artifacts using {ocr_model}/{extraction_model}")
-
-    def get_processed_pages(self, file_path: str) -> List[int]:
-        """Get list of already processed page numbers for a file by checking artifacts table"""
-        file_hash = self._calculate_file_hash(file_path)
-        pages = set()
-        
-        for artifact in self.db.values():
-            if artifact.get("file_hash") == file_hash:
-                page_num = artifact.get("source_page")
-                if page_num:
-                    pages.add(page_num)
-        
-        return sorted(list(pages))
 
 # Global instance
 _db_instance = None

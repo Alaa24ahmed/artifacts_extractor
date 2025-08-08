@@ -2,8 +2,6 @@
 import os
 import json
 import logging
-import hashlib
-from typing import List, Dict, Optional, Tuple
 from dotenv import load_dotenv
 from pathlib import Path
 from .image_processing import extract_images_from_pdf, prepare_input_image
@@ -16,7 +14,7 @@ import re
 
 # Load configuration using the configuration manager
 try:
-    from .config_manager import load_configuration, generate_processing_params_hash, get_model_identifiers
+    from .config_manager import load_configuration
     load_configuration()
     print("✅ Configuration loaded in processors.py")
 except Exception as e:
@@ -27,30 +25,6 @@ except Exception as e:
     load_dotenv(env_path, override=True)
 
 logger = logging.getLogger(__name__)
-
-def _calculate_file_hash(file_path: str) -> str:
-    """Calculate MD5 hash of a file"""
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
-
-def _add_file_metadata_to_artifacts(artifacts: list, file_path: str) -> list:
-    """Add file hash and name metadata to all artifacts"""
-    if not artifacts or not file_path:
-        return artifacts
-    
-    file_hash = _calculate_file_hash(file_path)
-    file_name = os.path.basename(file_path)
-    
-    for artifact in artifacts:
-        artifact['file_hash'] = file_hash
-        artifact['file_name'] = file_name
-        if 'source_document' not in artifact:
-            artifact['source_document'] = file_name
-    
-    return artifacts
 
 def process_english_document(input_file, output_dir, model, start_page=1, end_page=None, 
                             correction_threshold=0.05, ocr_prompt=None, correction_prompt=None, 
@@ -148,9 +122,6 @@ def process_english_document(input_file, output_dir, model, start_page=1, end_pa
     
     # Save all artifacts
     if all_artifacts:
-        # Add file metadata to all artifacts
-        all_artifacts = _add_file_metadata_to_artifacts(all_artifacts, input_file)
-        
         all_artifacts_file = os.path.join(results_dir, "english_artifacts.json")
         with open(all_artifacts_file, 'w', encoding='utf-8') as f:
             json.dump(all_artifacts, f, indent=2, ensure_ascii=False)
@@ -289,6 +260,7 @@ def extract_multilingual_names(artifacts_en, other_lang_file, output_dir, model,
                 )
             
             # Extract multilingual names from the page using extraction model
+            logger.info(f"About to extract {lang} names for {len(page_artifacts)} artifacts on page {page_num}")
             name_mappings = extract_multilingual_names_from_page(
                 image_path=image_path,
                 page_num=page_num,
@@ -303,6 +275,10 @@ def extract_multilingual_names(artifacts_en, other_lang_file, output_dir, model,
                 results_dir=results_dir,
                 correction_threshold=correction_threshold
             )
+            
+            logger.info(f"Extracted {len(name_mappings)} {lang} name mappings from page {page_num}")
+            if not name_mappings:
+                logger.warning(f"No {lang} name mappings found for page {page_num} - this will result in empty {lang} names")
             
             all_name_mappings.extend(name_mappings)
             
@@ -337,12 +313,16 @@ def create_consolidated_database(artifacts_en, ar_name_mappings, fr_name_mapping
         if en_name and ar_name and ar_name != "NOT_FOUND":
             ar_name_dict[en_name] = ar_name
     
+    logger.info(f"Created AR name dictionary with {len(ar_name_dict)} mappings")
+    
     fr_name_dict = {}
     for mapping in fr_name_mappings:
         en_name = mapping.get("English_Name", "")
         fr_name = mapping.get("French_Name", "")
         if en_name and fr_name and fr_name != "NOT_FOUND":
             fr_name_dict[en_name] = fr_name
+            
+    logger.info(f"Created FR name dictionary with {len(fr_name_dict)} mappings")
     
     # Check for existing database
     json_output_file = os.path.join(output_dir, f"{doc_name}_multilingual.json")
@@ -410,16 +390,18 @@ def create_consolidated_database(artifacts_en, ar_name_mappings, fr_name_mapping
         json.dump(multilingual_artifacts, f, indent=2, ensure_ascii=False)
     
     # Validate and complete multilingual names
+    logger.info(f"About to validate {len(multilingual_artifacts)} multilingual artifacts")
     validated_artifacts = validate_and_complete_multilingual_names(
         multilingual_artifacts, model, validation_prompt_func
     )
+    logger.info(f"Validation complete. Got {len(validated_artifacts)} validated artifacts")
     
     # Ensure all metadata is preserved from raw to validated artifacts
     if len(validated_artifacts) == len(multilingual_artifacts):
         for i, validated in enumerate(validated_artifacts):
-            # Copy all metadata fields except name fields
+            # Copy all metadata fields except name fields, preserving original values
             for key, value in multilingual_artifacts[i].items():
-                if key not in validated and key not in ["Name_EN", "Name_AR", "Name_FR"]:
+                if key not in ["Name_EN", "Name_AR", "Name_FR", "Name_validation"]:
                     validated[key] = value
     
     # Save validated version as JSON
@@ -435,10 +417,195 @@ def create_consolidated_database(artifacts_en, ar_name_mappings, fr_name_mapping
     
     return validated_artifacts
 
+def process_specific_pages_english(input_file, output_dir, model, pages_to_process, 
+                                  correction_threshold=0.05, ocr_prompt=None, correction_prompt=None, 
+                                  artifact_prompt=None, ocr_model=None, extraction_model=None):
+    """Process specific pages of an English document."""
+    actual_ocr_model = ocr_model or model
+    actual_extraction_model = extraction_model or model
+    
+    # Set up document-specific directories
+    pdf_name = os.path.splitext(os.path.basename(input_file))[0]
+    doc_base_dir = os.path.join(output_dir, pdf_name)
+    pages_dir = os.path.join(doc_base_dir, "EN", "pages")
+    ocr_dir = os.path.join(doc_base_dir, "EN", "ocr")
+    ocr_corrected_dir = os.path.join(doc_base_dir, "EN", "ocr_corrected")
+    ocr_corrected2_dir = os.path.join(doc_base_dir, "EN", "ocr_corrected2")
+    ocr_corrected3_dir = os.path.join(doc_base_dir, "EN", "ocr_corrected3")
+    results_dir = os.path.join(doc_base_dir, model)
+    
+    # Create directories
+    os.makedirs(doc_base_dir, exist_ok=True)
+    os.makedirs(pages_dir, exist_ok=True)
+    os.makedirs(results_dir, exist_ok=True)
+    
+    document_name = os.path.basename(input_file)
+    
+    # Extract pages from the document (only needed pages)
+    if input_file.lower().endswith('.pdf'):
+        start_page = min(pages_to_process)
+        end_page = max(pages_to_process)
+        image_paths = extract_images_from_pdf(input_file, pages_dir, start_page, end_page)
+    else:
+        image_paths = prepare_input_image(input_file, pages_dir)
+    
+    # Process only the specified pages
+    all_artifacts = []
+    
+    for image_path, page_num in image_paths:
+        if page_num not in pages_to_process:
+            continue  # Skip pages not in our processing list
+            
+        logger.info(f"Processing English page {page_num}: {image_path}")
+        
+        # Set up directories for this page's OCR and correction
+        output_dirs = {
+            "ocr": ocr_dir,
+            "corrected1": ocr_corrected_dir,
+            "corrected2": ocr_corrected2_dir,
+            "corrected3": ocr_corrected3_dir
+        }
+        
+        try:
+            # Perform OCR with adaptive correction
+            final_corrected_text = perform_ocr_with_adaptive_correction(
+                image_path=image_path,
+                page_num=page_num,
+                document_name=document_name,
+                model=actual_ocr_model,
+                ocr_prompt_template=ocr_prompt,
+                correction_prompt_template=correction_prompt,
+                output_dirs=output_dirs,
+                lang="EN",
+                correction_threshold=correction_threshold
+            )
+            
+            # Extract artifacts
+            artifacts = extract_artifacts_from_page(
+                image_path=image_path,
+                page_num=page_num,
+                document_name=document_name,
+                model=actual_extraction_model,
+                final_corrected_text=final_corrected_text,
+                artifact_prompt_template=artifact_prompt,
+                results_dir=results_dir
+            )
+            
+            all_artifacts.extend(artifacts)
+            
+        except Exception as e:
+            logger.error(f"Error processing English page {page_num}: {e}")
+            continue
+    
+    logger.info(f"Processed {len(pages_to_process)} pages, found {len(all_artifacts)} artifacts")
+    return all_artifacts
+
+def extract_multilingual_names_for_page(page_artifacts, other_lang_file, page_num, lang,
+                                       ocr_model, extraction_model, correction_threshold, prompts):
+    """Extract multilingual names for artifacts from a specific page."""
+    try:
+        if not page_artifacts:
+            return []
+        
+        # Set up directories for this page's OCR and correction
+        pdf_name = os.path.splitext(os.path.basename(other_lang_file))[0]
+        doc_base_dir = os.path.join(os.path.dirname(other_lang_file), f"processing_{pdf_name}")
+        lang_pages_dir = os.path.join(doc_base_dir, lang, "pages")
+        lang_ocr_dir = os.path.join(doc_base_dir, lang, "ocr")
+        lang_ocr_corrected_dir = os.path.join(doc_base_dir, lang, "ocr_corrected")
+        lang_ocr_corrected2_dir = os.path.join(doc_base_dir, lang, "ocr_corrected2")
+        lang_ocr_corrected3_dir = os.path.join(doc_base_dir, lang, "ocr_corrected3")
+        results_dir = os.path.join(doc_base_dir, "results")
+        
+        # Create directories
+        for dir_path in [lang_pages_dir, lang_ocr_dir, lang_ocr_corrected_dir, 
+                        lang_ocr_corrected2_dir, lang_ocr_corrected3_dir, results_dir]:
+            os.makedirs(dir_path, exist_ok=True)
+        
+        # Extract page image if not already done
+        if other_lang_file.lower().endswith('.pdf'):
+            from .image_processing import extract_images_from_pdf
+            image_paths = extract_images_from_pdf(other_lang_file, lang_pages_dir, page_num, page_num)
+            if not image_paths:
+                logger.warning(f"Could not extract page {page_num} from {lang} document")
+                return []
+            image_path, _ = image_paths[0]
+        else:
+            image_path = other_lang_file
+        
+        # Set up output directories
+        output_dirs = {
+            "ocr": lang_ocr_dir,
+            "corrected1": lang_ocr_corrected_dir,
+            "corrected2": lang_ocr_corrected2_dir,
+            "corrected3": lang_ocr_corrected3_dir
+        }
+        
+        # Use existing extraction function
+        name_mappings = extract_multilingual_names_from_page(
+            image_path=image_path,
+            page_num=page_num,
+            page_artifacts=page_artifacts,
+            document_name=os.path.basename(other_lang_file),
+            model=extraction_model,
+            lang=lang,
+            name_extraction_prompt=prompts.get("multilingual"),
+            ocr_prompt_template=prompts.get("ocr"),
+            correction_prompt_template=prompts.get("correction"),
+            output_dirs=output_dirs,
+            results_dir=results_dir,
+            correction_threshold=correction_threshold
+        )
+        
+        logger.info(f"Extracted {len(name_mappings)} {lang} names for page {page_num}")
+        return name_mappings
+        
+    except Exception as e:
+        logger.error(f"Error extracting {lang} names for page {page_num}: {e}")
+        return []
+
+def merge_multilingual_names_for_page(page_artifacts, ar_names, fr_names):
+    """Merge English artifacts with multilingual names for a specific page."""
+    # Create name mappings
+    ar_name_dict = {}
+    for mapping in ar_names:
+        en_name = mapping.get("English_Name", "")
+        ar_name = mapping.get("Arabic_Name", "")
+        if en_name and ar_name and ar_name != "NOT_FOUND":
+            ar_name_dict[en_name] = ar_name
+    
+    fr_name_dict = {}
+    for mapping in fr_names:
+        en_name = mapping.get("English_Name", "")
+        fr_name = mapping.get("French_Name", "")
+        if en_name and fr_name and fr_name != "NOT_FOUND":
+            fr_name_dict[en_name] = fr_name
+    
+    # Merge with English artifacts
+    merged_artifacts = []
+    for artifact in page_artifacts:
+        en_name = artifact.get("Name", "")
+        merged_artifact = {
+            "Name_EN": en_name,
+            "Name_AR": ar_name_dict.get(en_name, ""),
+            "Name_FR": fr_name_dict.get(en_name, ""),
+            "Creator": artifact.get("Creator", ""),
+            "Creation Date": artifact.get("Creation Date", ""),
+            "Materials": artifact.get("Materials", ""),
+            "Origin": artifact.get("Origin", ""),
+            "Description": artifact.get("Description", ""),
+            "Category": artifact.get("Category", ""),
+            "source_page": artifact.get("source_page", ""),
+            "source_document": artifact.get("source_document", "")
+        }
+        merged_artifacts.append(merged_artifact)
+    
+    return merged_artifacts
+
 def process_multilingual_document_set(doc_group, output_dir, model, start_page=1, end_page=None, 
                                      correction_thresholds=None, prompts=None, csv_fields=None,
-                                     ocr_model=None, extraction_model=None):
-    """Process a set of multilingual documents (EN, AR, FR) using the two-phase approach with simple caching."""
+                                     ocr_model=None, extraction_model=None, save_to_db=True):
+    """Process a set of multilingual documents with intelligent page-level caching."""
     # Extract document base name
     base_name = os.path.basename(doc_group.get("EN", ""))
     base_name = os.path.splitext(base_name)[0]
@@ -446,21 +613,40 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
     
     logger.info(f"Processing multilingual document set: {base_name}")
     
-    # Get simple database client
+    # Set up models
+    actual_ocr_model = ocr_model or model
+    actual_extraction_model = extraction_model or model
+    
+    # Debug: Log the model assignments
+    logger.info(f"🔧 Model setup - OCR: {actual_ocr_model}, Extraction: {actual_extraction_model}, Base: {model}")
+    
+    # Get database client
     db = get_simple_db()
     
-    # Check cache first
+    # Check cache first with page-level intelligence
     en_file = doc_group.get("EN")
     if not en_file:
         logger.error("No English document provided. English is required for this workflow.")
         return
     
-    # Try to get cached results
-    cached_artifacts = db.check_cache(en_file)
-    if cached_artifacts:
-        logger.info(f"🎯 Using cached results with {len(cached_artifacts)} artifacts")
+    logger.info(f"🔍 Checking page-level cache for pages {start_page}-{end_page}")
+    
+    # Check page-level cache
+    cached_artifacts, missing_pages, cache_stats = db.check_page_level_cache(
+        doc_group, start_page, end_page, 
+        actual_ocr_model, actual_extraction_model, correction_thresholds
+    )
+    
+    # Report cache analysis
+    total_pages = end_page - start_page + 1
+    if cache_stats["cached_pages"] > 0:
+        logger.info(f"✅ Cache hit: {cache_stats['cached_pages']}/{total_pages} pages found in cache")
+        logger.info(f"📦 Retrieved {cache_stats['total_cached_artifacts']} cached artifacts")
+    
+    if not missing_pages:
+        logger.info("🎯 All pages found in cache! No processing needed.")
         
-        # Save to local files for compatibility with existing workflow
+        # Save to local files for compatibility
         doc_base_dir = os.path.join(output_dir, base_name)
         results_dir = os.path.join(doc_base_dir, model)
         os.makedirs(results_dir, exist_ok=True)
@@ -473,266 +659,141 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
         
         save_artifacts_to_csv(cached_artifacts, csv_output_file, csv_fields)
         
+        # Save run statistics
+        if save_to_db:
+            db.save_run_statistics(
+                doc_group, start_page, end_page, actual_ocr_model, actual_extraction_model,
+                correction_thresholds, len(cached_artifacts), cache_stats["cached_pages"], 0
+            )
+        
         return cached_artifacts
     
-    # Process normally if not in cache
-    logger.info("🔄 No cache found, processing document...")
+    # Process missing pages only
+    logger.info(f"🔄 Processing {len(missing_pages)} missing pages: {missing_pages}")
     
-    # PHASE 1: Process English document fully
-    artifacts_en, doc_base_dir = process_english_document(
+    # Process only missing pages for English document
+    new_artifacts_en = process_specific_pages_english(
         input_file=en_file,
         output_dir=output_dir,
         model=model,
-        start_page=start_page,
-        end_page=end_page,
+        pages_to_process=missing_pages,
         correction_threshold=correction_thresholds.get("EN", 0.05),
         ocr_prompt=prompts.get("ocr"),
         correction_prompt=prompts.get("correction"),
         artifact_prompt=prompts.get("artifact"),
-        ocr_model=ocr_model,
-        extraction_model=extraction_model
+        ocr_model=actual_ocr_model,
+        extraction_model=actual_extraction_model
     )
     
-    if not artifacts_en:
-        logger.warning("No artifacts found in English document, nothing to align.")
-        return []
+    if not new_artifacts_en:
+        logger.warning("No new artifacts found in missing pages")
+        return cached_artifacts
     
-    # PHASE 2: Extract artifact names in Arabic
-    ar_file = doc_group.get("AR")
-    ar_name_mappings = []
-    if ar_file:
-        ar_name_mappings = extract_multilingual_names(
-            artifacts_en=artifacts_en,
-            other_lang_file=ar_file,
-            output_dir=output_dir,
-            model=model,
-            lang="AR",
-            doc_base_dir=doc_base_dir,
-            correction_threshold=correction_thresholds.get("AR", 0.10),
-            ocr_prompt=prompts.get("ocr"),
-            correction_prompt=prompts.get("correction"),
-            name_extraction_prompt=prompts.get("multilingual"),
-            ocr_model=ocr_model,
-            extraction_model=extraction_model
-        )
+    # Process multilingual names for new artifacts only
+    # Group new artifacts by page
+    new_artifacts_by_page = {}
+    for artifact in new_artifacts_en:
+        page_num = artifact.get("source_page", 1)
+        if page_num not in new_artifacts_by_page:
+            new_artifacts_by_page[page_num] = []
+        new_artifacts_by_page[page_num].append(artifact)
     
-    # PHASE 3: Extract artifact names in French
-    fr_file = doc_group.get("FR")
-    fr_name_mappings = []
-    if fr_file:
-        fr_name_mappings = extract_multilingual_names(
-            artifacts_en=artifacts_en,
-            other_lang_file=fr_file,
-            output_dir=output_dir,
-            model=model,
-            lang="FR",
-            doc_base_dir=doc_base_dir,
-            correction_threshold=correction_thresholds.get("FR", 0.07),
-            ocr_prompt=prompts.get("ocr"),
-            correction_prompt=prompts.get("correction"),
-            name_extraction_prompt=prompts.get("multilingual"),
-            ocr_model=ocr_model,
-            extraction_model=extraction_model
-        )
+    # Extract names in other languages for missing pages
+    all_new_artifacts = []
     
-    # PHASE 4: Create consolidated database
-    final_artifacts = create_consolidated_database(
-        artifacts_en=artifacts_en,
-        ar_name_mappings=ar_name_mappings,
-        fr_name_mappings=fr_name_mappings,
-        output_dir=os.path.join(doc_base_dir, model),
-        doc_name=base_name,
-        model=extraction_model or model,  # Use extraction model for validation
-        validation_prompt_func=prompts.get("validation"),
-        csv_fields=csv_fields
-    )
-    
-    # Save to database cache
-    if final_artifacts:
-        # Ensure file metadata is present
-        final_artifacts = _add_file_metadata_to_artifacts(final_artifacts, en_file)
+    for page_num in missing_pages:
+        if page_num not in new_artifacts_by_page:
+            continue
+            
+        page_artifacts = new_artifacts_by_page[page_num]
         
-        if db.save_artifacts(en_file, final_artifacts):
-            logger.info("💾 Results saved to database cache")
+        # Process Arabic names for this page
+        ar_file = doc_group.get("AR")
+        ar_names = []
+        if ar_file:
+            ar_names = extract_multilingual_names_for_page(
+                page_artifacts, ar_file, page_num, "AR",
+                actual_ocr_model, actual_extraction_model,
+                correction_thresholds.get("AR", 0.10),
+                prompts
+            )
+        
+        # Process French names for this page  
+        fr_file = doc_group.get("FR")
+        fr_names = []
+        if fr_file:
+            fr_names = extract_multilingual_names_for_page(
+                page_artifacts, fr_file, page_num, "FR",
+                actual_ocr_model, actual_extraction_model,
+                correction_thresholds.get("FR", 0.07),
+                prompts
+            )
+        
+        # Merge multilingual names for this page
+        page_final_artifacts = merge_multilingual_names_for_page(
+            page_artifacts, ar_names, fr_names
+        )
+        
+        # Apply validation if available
+        if prompts.get("validation"):
+            try:
+                original_artifacts = page_final_artifacts.copy()
+                page_final_artifacts = validate_and_complete_multilingual_names(
+                    page_final_artifacts, actual_extraction_model, prompts.get("validation")
+                )
+                
+                # Ensure all metadata is preserved from original to validated artifacts
+                if len(page_final_artifacts) == len(original_artifacts):
+                    for i, validated in enumerate(page_final_artifacts):
+                        # Copy all metadata fields except name fields, preserving original values
+                        for key, value in original_artifacts[i].items():
+                            if key not in ["Name_EN", "Name_AR", "Name_FR", "Name_validation"]:
+                                validated[key] = value
+                                
+            except Exception as e:
+                logger.warning(f"Validation failed for page {page_num}, using unvalidated results: {e}")
+        
+        # Save this page to cache
+        if save_to_db:
+            logger.info(f"💾 Saving page {page_num} to DB with OCR model: {actual_ocr_model}, Extraction model: {actual_extraction_model}")
+            db.save_page_artifacts(
+                doc_group, page_num, page_final_artifacts,
+                actual_ocr_model, actual_extraction_model, correction_thresholds
+            )
+        
+        all_new_artifacts.extend(page_final_artifacts)
+    
+    # Combine cached and new artifacts
+    final_artifacts = cached_artifacts + all_new_artifacts
+    
+    # Save to local files
+    doc_base_dir = os.path.join(output_dir, base_name) 
+    results_dir = os.path.join(doc_base_dir, model)
+    os.makedirs(results_dir, exist_ok=True)
+    
+    json_output_file = os.path.join(results_dir, f"{base_name}_multilingual.json")
+    csv_output_file = os.path.join(results_dir, f"{base_name}_multilingual.csv")
+    
+    with open(json_output_file, 'w', encoding='utf-8') as f:
+        json.dump(final_artifacts, f, indent=2, ensure_ascii=False)
+    
+    save_artifacts_to_csv(final_artifacts, csv_output_file, csv_fields)
+    
+    # Save run statistics
+    if save_to_db:
+        db.save_run_statistics(
+            doc_group, start_page, end_page, actual_ocr_model, actual_extraction_model,
+            correction_thresholds, len(final_artifacts), cache_stats["cached_pages"], len(missing_pages)
+        )
+    
+    logger.info(f"✅ Processing complete!")
+    logger.info(f"📊 Final results: {len(final_artifacts)} total artifacts")
+    logger.info(f"📈 Performance: {cache_stats['cached_pages']} pages from cache, {len(missing_pages)} pages processed")
+    
+    # Calculate performance metrics
+    if total_pages > 0:
+        cache_hit_rate = (cache_stats["cached_pages"] / total_pages) * 100
+        processing_saved = cache_stats["cached_pages"] * 100 / total_pages
+        logger.info(f"🚀 Cache efficiency: {cache_hit_rate:.1f}% hit rate, saved {processing_saved:.1f}% processing time")
     
     return final_artifacts
-
-
-def process_document_with_page_caching(pdf_path: str, db_manager, page_range: tuple = None,
-                                     config: dict = None) -> List[Dict]:
-    """
-    Process a document page by page with intelligent caching.
-    
-    Args:
-        pdf_path: Path to the PDF document
-        db_manager: Database manager instance
-        page_range: Optional tuple (start_page, end_page) to process specific pages
-        config: Configuration dictionary containing model and processing parameters
-    
-    Returns:
-        List of processed artifacts
-    """
-    try:
-        logger.info(f"Starting page-by-page processing of {os.path.basename(pdf_path)}")
-        
-        # Extract model information and processing parameters
-        config = config or {}
-        ocr_model, extraction_model = get_model_identifiers(config)
-        processing_params_hash = generate_processing_params_hash(
-            ocr_correction_threshold=config.get('ocr_correction_threshold'),
-            api_model=config.get('api_model'),
-            temperature=config.get('temperature'),
-            max_tokens=config.get('max_tokens')
-        )
-        
-        logger.info(f"Using models: OCR={ocr_model}, Extraction={extraction_model}")
-        logger.info(f"Processing parameters hash: {processing_params_hash}")
-        
-        # Extract text from PDF
-        from .text_processing import extract_text_from_pdf
-        pages = extract_text_from_pdf(pdf_path)
-        
-        # Determine which pages to process
-        total_pages = len(pages)
-        if page_range:
-            start_page, end_page = page_range
-            start_page = max(1, start_page)
-            end_page = min(total_pages, end_page)
-            pages_to_check = list(range(start_page, end_page + 1))
-        else:
-            pages_to_check = list(range(1, total_pages + 1))
-        
-        logger.info(f"Total pages in document: {total_pages}")
-        logger.info(f"Pages to check: {pages_to_check}")
-        
-        all_artifacts = []
-        
-        for page_num in pages_to_check:
-            try:
-                # Check if page already processed with current models and parameters
-                if db_manager.check_page_processed(pdf_path, page_num, ocr_model, 
-                                                 extraction_model, processing_params_hash):
-                    logger.info(f"Page {page_num} already processed with current models, retrieving from database...")
-                    page_artifacts = db_manager.get_page_artifacts(pdf_path, page_num)
-                    all_artifacts.extend(page_artifacts)
-                    logger.info(f"Retrieved {len(page_artifacts)} artifacts from page {page_num}")
-                    continue
-                
-                # Process the page
-                logger.info(f"Processing page {page_num} with {ocr_model}/{extraction_model}...")
-                page_text = pages[page_num - 1]  # Convert to 0-based index
-                
-                # Extract artifacts from this page
-                from .extraction import extract_artifacts_from_page
-                page_artifacts = extract_artifacts_from_page(page_text, page_num, config)
-                
-                if page_artifacts:
-                    # Add file metadata to each artifact
-                    file_hash = db_manager._calculate_file_hash(pdf_path)
-                    file_name = os.path.basename(pdf_path)
-                    
-                    for artifact in page_artifacts:
-                        artifact['file_hash'] = file_hash
-                        artifact['file_name'] = file_name
-                        artifact['source_page'] = page_num
-                        artifact['source_document'] = file_name
-                        
-                        # Save to database with model information
-                        saved_artifact = db_manager.add_artifact(
-                            artifact, pdf_path, ocr_model, extraction_model, processing_params_hash
-                        )
-                        if saved_artifact:
-                            all_artifacts.append(saved_artifact)
-                    
-                    # Mark page as processed with model information
-                    db_manager.mark_page_processed(
-                        pdf_path, page_num, len(page_artifacts), 
-                        ocr_model, extraction_model, processing_params_hash
-                    )
-                    
-                    logger.info(f"Processed page {page_num}: found {len(page_artifacts)} artifacts")
-                else:
-                    logger.info(f"Page {page_num}: no artifacts found")
-                    # Still mark as processed to avoid re-processing
-                    db_manager.mark_page_processed(
-                        pdf_path, page_num, 0, 
-                        ocr_model, extraction_model, processing_params_hash
-                    )
-                
-            except Exception as e:
-                logger.error(f"Error processing page {page_num}: {e}")
-                continue
-        
-        logger.info(f"Completed processing. Total artifacts: {len(all_artifacts)}")
-        return all_artifacts
-        
-    except Exception as e:
-        logger.error(f"Error in page-by-page processing: {e}")
-        return []
-
-
-def get_document_processing_status(pdf_path: str, db_manager) -> Dict:
-    """
-    Get the processing status of a document showing which pages are done.
-    
-    Returns:
-        Dictionary with processing status information
-    """
-    try:
-        from .text_processing import extract_text_from_pdf
-        pages = extract_text_from_pdf(pdf_path)
-        total_pages = len(pages)
-        
-        processed_pages = db_manager.get_processed_pages(pdf_path)
-        unprocessed_pages = [p for p in range(1, total_pages + 1) if p not in processed_pages]
-        
-        # Get artifact counts per page
-        page_artifact_counts = {}
-        for page_num in processed_pages:
-            artifacts = db_manager.get_page_artifacts(pdf_path, page_num)
-            page_artifact_counts[page_num] = len(artifacts)
-        
-        status = {
-            'file_name': os.path.basename(pdf_path),
-            'total_pages': total_pages,
-            'processed_pages': processed_pages,
-            'unprocessed_pages': unprocessed_pages,
-            'completion_percentage': (len(processed_pages) / total_pages) * 100 if total_pages > 0 else 0,
-            'page_artifact_counts': page_artifact_counts,
-            'total_artifacts': sum(page_artifact_counts.values())
-        }
-        
-        return status
-        
-    except Exception as e:
-        logger.error(f"Error getting document status: {e}")
-        return {}
-
-
-def continue_document_processing(pdf_path: str, db_manager) -> List[Dict]:
-    """
-    Continue processing a document from where it left off.
-    Only processes unprocessed pages.
-    """
-    try:
-        status = get_document_processing_status(pdf_path, db_manager)
-        unprocessed_pages = status.get('unprocessed_pages', [])
-        
-        if not unprocessed_pages:
-            logger.info(f"Document {os.path.basename(pdf_path)} is already fully processed")
-            # Return all existing artifacts
-            return db_manager.get_artifacts_by_file(db_manager._calculate_file_hash(pdf_path))
-        
-        logger.info(f"Continuing processing for pages: {unprocessed_pages}")
-        
-        # Process only unprocessed pages
-        if unprocessed_pages:
-            start_page = min(unprocessed_pages)
-            end_page = max(unprocessed_pages)
-            return process_document_with_page_caching(pdf_path, db_manager, (start_page, end_page))
-        
-        return []
-        
-    except Exception as e:
-        logger.error(f"Error continuing document processing: {e}")
-        return []

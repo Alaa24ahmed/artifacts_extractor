@@ -97,11 +97,13 @@ def extract_multilingual_names_from_page(image_path, page_num, page_artifacts, d
     """Extract artifact names in another language for a specific page."""
     logger.info(f"Extracting {lang} names for artifacts on page {page_num}: {', '.join([a.get('Name', 'Unknown') for a in page_artifacts])}")
     
-    # First read the OCR text for this page
+    # First check if OCR text exists, if not, perform OCR
     ocr_output_file = os.path.join(output_dirs["ocr"], f"page_{page_num}_ocr.txt")
     ocr_corrected2_file = os.path.join(output_dirs["corrected2"], f"page_{page_num}_ocr_corrected2.txt")
     ocr_corrected3_file = os.path.join(output_dirs["corrected3"], f"page_{page_num}_ocr_corrected3.txt")
     
+    # Try to read existing OCR text
+    ocr_text = None
     if os.path.exists(ocr_corrected3_file):
         with open(ocr_corrected3_file, 'r', encoding='utf-8') as f:
             ocr_text = f.read()
@@ -111,8 +113,25 @@ def extract_multilingual_names_from_page(image_path, page_num, page_artifacts, d
     elif os.path.exists(ocr_output_file):
         with open(ocr_output_file, 'r', encoding='utf-8') as f:
             ocr_text = f.read()
-    else:
-        raise FileNotFoundError(f"No OCR text found for {lang} page {page_num}")
+    
+    # If no OCR text exists, perform OCR with correction
+    if not ocr_text:
+        logger.info(f"No existing OCR text found for {lang} page {page_num}, performing OCR")
+        try:
+            ocr_text = perform_ocr_with_adaptive_correction(
+                image_path=image_path,
+                page_num=page_num,
+                document_name=document_name,
+                model=model,
+                ocr_prompt_template=ocr_prompt_template,
+                correction_prompt_template=correction_prompt_template,
+                output_dirs=output_dirs,
+                lang=lang,
+                correction_threshold=correction_threshold
+            )
+        except Exception as e:
+            logger.error(f"Failed to perform OCR for {lang} page {page_num}: {e}")
+            return []
     
     # Create the multilingual name extraction prompt
     prompt_template = name_extraction_prompt.format(
