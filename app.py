@@ -249,7 +249,8 @@ def setup_logging():
         except Exception as e:
             print(f"Error resetting log file: {e}")
     
-    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=5*1024*1024, backupCount=2)
+    # INCREASED SIZE LIMIT for multi-page processing to prevent log rotation mid-process
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=50*1024*1024, backupCount=5)
     file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     file_handler.setFormatter(file_formatter)
     logger.addHandler(file_handler)
@@ -443,39 +444,65 @@ def find_results_directory():
     return None
 
 def get_latest_logs(max_lines=50):
-    """Read the latest logs from the log file"""
+    """Read the latest logs from the log file, handling log rotation"""
     if not os.path.exists(LOG_FILE):
         return "No logs available yet."
     
     try:
-        with open(LOG_FILE, 'r') as f:
-            # Read all lines
-            lines = f.readlines()
+        # Check current log file size and content
+        log_files_to_check = [LOG_FILE]
+        
+        # If main log file is empty or very small, check backup files
+        if os.path.getsize(LOG_FILE) < 100:  # Less than 100 bytes might indicate rotation
+            # Add backup files in order (newest first)
+            for i in range(1, 6):  # Check up to 5 backup files
+                backup_file = f"{LOG_FILE}.{i}"
+                if os.path.exists(backup_file):
+                    log_files_to_check.append(backup_file)
+        
+        all_lines = []
+        
+        # Read from available log files
+        for log_file in log_files_to_check:
+            try:
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    if lines:
+                        all_lines.extend(lines)
+                        # If we have enough lines, we can stop
+                        if len(all_lines) >= max_lines * 2:  # Get extra to ensure we have enough
+                            break
+            except Exception as e:
+                # If one file fails, continue with others
+                continue
+        
+        if not all_lines:
+            return "No logs available."
+        
+        # Get the last max_lines
+        latest_lines = all_lines[-max_lines:] if len(all_lines) > max_lines else all_lines
+        
+        # Format the logs for display with proper highlighting
+        formatted_lines = []
+        for line in latest_lines:
+            # Clean up timestamp format for better readability
+            line = re.sub(r'^\d{4}-\d{2}-\d{2} ', '', line)
             
-            # Get the last max_lines
-            latest_lines = lines[-max_lines:] if len(lines) > max_lines else lines
+            # Highlight different log levels with colors
+            if ' INFO - ' in line:
+                # Highlight key processing stages more prominently
+                if any(x in line for x in ['Processing', 'Extracting', 'Created', 'Results saved']):
+                    line = f'<span style="color: #4169E1; font-weight: bold;">{line}</span>'
+                else:
+                    line = f'<span style="color: #0066cc;">{line}</span>'
+            elif ' WARNING - ' in line:
+                line = f'<span style="color: #ff9900;">{line}</span>'
+            elif ' ERROR - ' in line:
+                line = f'<span style="color: #cc0000; font-weight: bold;">{line}</span>'
             
-            # Format the logs for display with proper highlighting
-            formatted_lines = []
-            for line in latest_lines:
-                # Clean up timestamp format for better readability
-                line = re.sub(r'^\d{4}-\d{2}-\d{2} ', '', line)
-                
-                # Highlight different log levels with colors
-                if ' INFO - ' in line:
-                    # Highlight key processing stages more prominently
-                    if any(x in line for x in ['Processing', 'Extracting', 'Created', 'Results saved']):
-                        line = f'<span style="color: #4169E1; font-weight: bold;">{line}</span>'
-                    else:
-                        line = f'<span style="color: #0066cc;">{line}</span>'
-                elif ' WARNING - ' in line:
-                    line = f'<span style="color: #ff9900;">{line}</span>'
-                elif ' ERROR - ' in line:
-                    line = f'<span style="color: #cc0000; font-weight: bold;">{line}</span>'
-                
-                formatted_lines.append(line)
-            
-            return "<br>".join(formatted_lines)
+            formatted_lines.append(line)
+        
+        return "<br>".join(formatted_lines)
     except Exception as e:
         return f"Error reading logs: {str(e)}"
 
@@ -1305,7 +1332,7 @@ def main():
             with page_col2:
                 # Add "All pages" checkbox
                 all_pages = st.checkbox("Till end of document", 
-                                     value=True,
+                                     value=False,
                                      disabled=st.session_state.processing_status['status'] == 'processing',
                                      key="all_pages")
             
@@ -1609,13 +1636,8 @@ def main():
             """, unsafe_allow_html=True)
             
             with st.expander("Processing Logs", expanded=st.session_state.display_logs):
-                # Add a toggle for auto-scrolling and refresh button
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    auto_scroll = st.checkbox("Auto-scroll to latest logs", value=True)
-                with col2:
-                    if st.button("Refresh Logs", key="refresh_logs"):
-                        st.experimental_rerun()
+                # Add a toggle for auto-scrolling
+                auto_scroll = st.checkbox("Auto-scroll to latest logs", value=True)
                 
                 # Get the latest log content
                 logs_html = get_latest_logs(100)  # Get the latest 100 log lines
