@@ -1591,7 +1591,7 @@ def main():
                     # Create a scrollable iframe that always stays at the bottom
                     log_height = 600  # Increased for better visibility
                     st.markdown(f"""
-                    <div style="height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
+                    <div style="width: 100%; height: {log_height}px; min-height: {log_height}px; overflow: hidden; margin-bottom: 10px;">
                         <iframe srcdoc='
                             <html>
                             <head>
@@ -1600,22 +1600,31 @@ def main():
                                         height: 100%;
                                         min-height: 600px;
                                         margin: 0;
-                                        padding: 0;
+                                        padding: 10px;
                                         overflow: hidden;
+                                        width: 100%;
+                                        box-sizing: border-box;
                                     }}
                                     body {{
                                         font-family: monospace;
                                         font-size: 12px;
                                         line-height: 1.5;
-                                        padding: 10px;
                                         background-color: #f8f9fa;
                                         overflow-y: auto;
-                                        box-sizing: border-box;
-                                        height: 100%;
+                                        width: 100%;
+                                        max-width: 100%;
                                     }}
                                     #log-container {{
                                         height: 100%;
+                                        width: 100%;
                                         overflow-y: auto;
+                                        overflow-x: hidden;
+                                        word-wrap: break-word;
+                                    }}
+                                    #log-content {{
+                                        width: 100%;
+                                        word-wrap: break-word;
+                                        white-space: pre-wrap;
                                     }}
                                     .info {{
                                         color: #0066cc;
@@ -1650,13 +1659,13 @@ def main():
                                 </script>
                             </body>
                             </html>
-                        ' height="{log_height}" width="100%" style="height: {log_height}px; min-height: {log_height}px; border: 1px solid #dee2e6; border-radius: 5px; display: block;"></iframe>
+                        ' height="{log_height}" width="100%" style="width: 100%; height: {log_height}px; min-height: {log_height}px; border: 1px solid #dee2e6; border-radius: 5px; display: block;"></iframe>
                     </div>
                     """, unsafe_allow_html=True)
                 else:
                     # Regular version without auto-scroll
                     st.markdown(f"""
-                    <div class="log-container" id="logContainer" style="height: 300px; min-height: 300px; max-height: 300px; overflow-y: auto; display: block;">
+                    <div class="log-container" id="logContainer" style="width: 100%; height: 300px; min-height: 300px; max-height: 300px; overflow-y: auto; overflow-x: hidden; display: block; border: 1px solid #dee2e6; border-radius: 5px; padding: 10px; background-color: #f8f9fa; font-family: monospace; font-size: 12px; line-height: 1.5; word-wrap: break-word; white-space: pre-wrap;">
                         {logs_html}
                     </div>
                     """, unsafe_allow_html=True)
