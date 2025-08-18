@@ -979,7 +979,11 @@ def display_results(output_dir=None):
                                                 artifacts_by_page[page_num].append(artifact)
                                             
                                             # Save each page separately with actual user-selected models
-                                            doc_group = {"EN": f"imported_file_{file_hash[:8]}.pdf"}
+                                            # Use actual document name from session state
+                                            actual_doc_name = st.session_state.uploaded_file_names.get('EN', 'unknown_document.pdf')
+                                            if actual_doc_name is None:
+                                                actual_doc_name = 'unknown_document.pdf'
+                                            doc_group = {"EN": actual_doc_name}
                                             
                                             # Use the actual models selected by the user from session state
                                             if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:
@@ -997,7 +1001,8 @@ def display_results(output_dir=None):
                                             for page_num, page_artifacts in artifacts_by_page.items():
                                                 success = db.save_page_artifacts(
                                                     doc_group, page_num, page_artifacts,
-                                                    actual_ocr_model, actual_extraction_model, actual_thresholds
+                                                    actual_ocr_model, actual_extraction_model, actual_thresholds,
+                                                    provided_file_hash=file_hash
                                                 )
                                                 if success:
                                                     total_saved += len(page_artifacts)
@@ -1006,18 +1011,31 @@ def display_results(output_dir=None):
                                                 st.success(f"✅ Successfully saved {total_saved} artifacts to database!")
                                                 st.info(f"📁 Saved from: {os.path.basename(results_file)}")
                                                 
-                                                # Save run statistics with correct page range
-                                                if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:
-                                                    params = st.session_state.last_processing_params
-                                                    actual_start_page = params.get('start_page', 1)
-                                                    actual_end_page = params.get('end_page')
-                                                else:
-                                                    actual_start_page = 1
-                                                    actual_end_page = len(artifacts_by_page)
+                                                # Temporary debug info to verify the fixes
+                                                with st.expander("📊 Database Save Details", expanded=False):
+                                                    st.write(f"**Document name**: {actual_doc_name}")
+                                                    if artifacts_by_page:
+                                                        temp_start = min(artifacts_by_page.keys())
+                                                        temp_end = max(artifacts_by_page.keys())
+                                                        st.write(f"**Page range**: {temp_start} to {temp_end}")
+                                                    st.write(f"**OCR model**: {actual_ocr_model}")
+                                                    st.write(f"**Extraction model**: {actual_extraction_model}")
+                                                    st.write(f"**File hash**: {file_hash[:16]}...")
                                                 
-                                                # Use actual end_page or calculate from artifacts if None
-                                                if actual_end_page is None:
-                                                    actual_end_page = max(artifacts_by_page.keys()) if artifacts_by_page else actual_start_page
+                                                # Save run statistics with correct page range
+                                                # Calculate actual page range from the artifacts themselves
+                                                if artifacts_by_page:
+                                                    actual_start_page = min(artifacts_by_page.keys())
+                                                    actual_end_page = max(artifacts_by_page.keys())
+                                                else:
+                                                    # Fallback to session state if no artifacts
+                                                    if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:
+                                                        params = st.session_state.last_processing_params
+                                                        actual_start_page = params.get('start_page', 1)
+                                                        actual_end_page = params.get('end_page', 1)
+                                                    else:
+                                                        actual_start_page = 1
+                                                        actual_end_page = 1
                                                 
                                                 db.save_run_statistics(
                                                     doc_group, actual_start_page, actual_end_page, 

@@ -240,7 +240,8 @@ class SimpleArtifactDB:
         }
 
     def save_page_artifacts(self, doc_group: dict, page_num: int, artifacts: List[Dict],
-                          ocr_model: str, extraction_model: str, thresholds: dict) -> bool:
+                          ocr_model: str, extraction_model: str, thresholds: dict, 
+                          provided_file_hash: str = None) -> bool:
         """Save artifacts from a specific page with cache key"""
         if not self.enabled or not artifacts:
             return False
@@ -249,26 +250,30 @@ class SimpleArtifactDB:
         logger.info(f"💾 DB Save - OCR model: '{ocr_model}', Extraction model: '{extraction_model}'")
             
         try:
-            # Get main file hash
-            en_file = doc_group.get("EN", "")
-            file_hash = self._hash_file(en_file) if en_file else ""
-            
-            # If we can't hash the original file (e.g., temporary file no longer exists),
-            # we need a content-based fallback for caching to work properly
-            if not file_hash:
-                # For caching purposes, we need a deterministic hash based on document identity
-                # Use the original filename (which contains unique ID) as the basis
-                # This allows cache hits when same document is re-uploaded
-                file_basename = os.path.basename(en_file) if en_file else "unknown_document"
-                # Remove the random prefix that Streamlit adds, keep the core identifier
-                if file_basename.startswith("imported_file_"):
-                    # Extract the unique part: imported_file_0e6834e5.pdf -> 0e6834e5.pdf
-                    core_name = file_basename.replace("imported_file_", "")
-                else:
-                    core_name = file_basename
+            # Get main file hash - use provided hash if available, otherwise try to hash the file
+            if provided_file_hash:
+                file_hash = provided_file_hash
+                logger.info(f"💾 Using provided file hash: {file_hash[:16]}...")
+            else:
+                en_file = doc_group.get("EN", "")
+                file_hash = self._hash_file(en_file) if en_file and os.path.exists(en_file) else ""
                 
-                file_hash = hashlib.sha256(core_name.encode()).hexdigest()
-                logger.warning(f"Using content-based fallback hash for caching: {core_name}")
+                # If we can't hash the original file (e.g., temporary file no longer exists),
+                # we need a content-based fallback for caching to work properly
+                if not file_hash:
+                    # For caching purposes, we need a deterministic hash based on document identity
+                    # Use the original filename (which contains unique ID) as the basis
+                    # This allows cache hits when same document is re-uploaded
+                    file_basename = os.path.basename(en_file) if en_file else "unknown_document"
+                    # Remove the random prefix that Streamlit adds, keep the core identifier
+                    if file_basename.startswith("imported_file_"):
+                        # Extract the unique part: imported_file_0e6834e5.pdf -> 0e6834e5.pdf
+                        core_name = file_basename.replace("imported_file_", "")
+                    else:
+                        core_name = file_basename
+                    
+                    file_hash = hashlib.sha256(core_name.encode()).hexdigest()
+                    logger.warning(f"Using content-based fallback hash for caching: {core_name}")
             
             if not file_hash:
                 logger.error("Cannot create file hash for page artifacts")
