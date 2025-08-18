@@ -318,15 +318,22 @@ class SimpleArtifactDB:
 
     def save_run_statistics(self, doc_group: dict, start_page: int, end_page: int,
                           ocr_model: str, extraction_model: str, thresholds: dict,
-                          total_artifacts: int, cached_pages: int, processed_pages: int) -> bool:
+                          total_artifacts: int, cached_pages: int, processed_pages: int, 
+                          provided_file_hash: str = None) -> bool:
         """Save statistics for a complete processing run"""
         if not self.enabled:
             return False
             
         try:
-            # Get main file hash
-            en_file = doc_group.get("EN", "")
-            file_hash = self._hash_file(en_file) if en_file else ""
+            # Get main file hash - use provided hash if available, otherwise try to hash the file
+            if provided_file_hash:
+                file_hash = provided_file_hash
+                logger.info(f"📊 Using provided file hash: {file_hash[:16]}...")
+            else:
+                en_file = doc_group.get("EN", "")
+                file_hash = self._hash_file(en_file) if en_file and os.path.exists(en_file) else ""
+                if not file_hash:
+                    logger.warning(f"⚠️ Could not generate file hash for {en_file}")
             
             # Create run cache key
             run_cache_key = self._create_run_cache_key(

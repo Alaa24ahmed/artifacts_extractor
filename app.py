@@ -1034,11 +1034,28 @@ def display_results(output_dir=None):
                                                 st.success(f"✅ Successfully saved {total_saved} artifacts to database!")
                                                 st.info(f"📁 Saved from: {os.path.basename(results_file)}")
                                                 
-                                                # Save run statistics
+                                                # Save run statistics with correct page range
+                                                if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:
+                                                    params = st.session_state.last_processing_params
+                                                    actual_start_page = params.get('start_page', 1)
+                                                    actual_end_page = params.get('end_page')
+                                                else:
+                                                    actual_start_page = 1
+                                                    actual_end_page = len(artifacts_by_page)
+                                                
+                                                # Use actual end_page or calculate from artifacts if None
+                                                if actual_end_page is None:
+                                                    actual_end_page = max(artifacts_by_page.keys()) if artifacts_by_page else actual_start_page
+                                                
+                                                # Debug: Log the page range being saved
+                                                st.code(f"📊 Saving run stats - Start page: {actual_start_page}, End page: {actual_end_page}")
+                                                st.code(f"📊 File hash: {file_hash[:16]}...")
+                                                
                                                 db.save_run_statistics(
-                                                    doc_group, 1, len(artifacts_by_page), 
+                                                    doc_group, actual_start_page, actual_end_page, 
                                                     actual_ocr_model, actual_extraction_model, actual_thresholds,
-                                                    total_saved, 0, len(artifacts_by_page)
+                                                    total_saved, 0, len(artifacts_by_page),
+                                                    provided_file_hash=file_hash
                                                 )
                                             else:
                                                 st.error("❌ Failed to save artifacts to database.")
