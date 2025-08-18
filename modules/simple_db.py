@@ -217,8 +217,11 @@ class SimpleArtifactDB:
     
     def _map_artifact_to_new_schema(self, artifact: dict, page_cache_key: str, 
                                    page_num: int, ocr_model: str, extraction_model: str,
-                                   processing_params_hash: str) -> dict:
+                                   processing_params_hash: str, actual_source_document: str = None) -> dict:
         """Map artifact fields from old format to new schema with cache keys"""
+        # Use actual source document name if provided, otherwise fall back to artifact data
+        source_doc = actual_source_document if actual_source_document else artifact.get("source_document", "")
+        
         return {
             "page_cache_key": page_cache_key,
             "page_number": page_num,
@@ -232,7 +235,7 @@ class SimpleArtifactDB:
             "description": artifact.get("Description", ""),
             "category": artifact.get("Category", ""),
             "source_page": artifact.get("source_page", page_num),
-            "source_document": artifact.get("source_document", ""),
+            "source_document": source_doc,
             "name_validation": artifact.get("Name_validation", ""),
             "ocr_model": ocr_model,
             "extraction_model": extraction_model,
@@ -296,12 +299,19 @@ class SimpleArtifactDB:
                 logger.info(f"Page {page_num} already cached, skipping save")
                 return True
             
+            # Get the actual source document name from doc_group
+            actual_source_document = None
+            for lang, filename in doc_group.items():
+                if filename:  # Use the first available document name as source
+                    actual_source_document = filename
+                    break
+            
             # Map and save each artifact
             saved_count = 0
             for artifact in artifacts:
                 mapped_artifact = self._map_artifact_to_new_schema(
                     artifact, page_cache_key, page_num, ocr_model, 
-                    extraction_model, processing_params_hash
+                    extraction_model, processing_params_hash, actual_source_document
                 )
                 
                 # Add file hash

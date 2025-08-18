@@ -1162,31 +1162,6 @@ def main():
     with st.container():
         st.markdown('<div class="upload-section">', unsafe_allow_html=True)
         
-        # Display current uploaded files first
-        if any(st.session_state.uploaded_file_names.values()):
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.session_state.uploaded_file_names['EN']:
-                    st.markdown(
-                        f'<div class="success-card"><span class="lang-badge en-badge">EN</span> {st.session_state.uploaded_file_names["EN"]}</div>',
-                        unsafe_allow_html=True
-                    )
-            
-            with col2:
-                if st.session_state.uploaded_file_names['AR']:
-                    st.markdown(
-                        f'<div class="success-card"><span class="lang-badge ar-badge">AR</span> {st.session_state.uploaded_file_names["AR"]}</div>',
-                        unsafe_allow_html=True
-                    )
-            
-            with col3:
-                if st.session_state.uploaded_file_names['FR']:
-                    st.markdown(
-                        f'<div class="success-card"><span class="lang-badge fr-badge">FR</span> {st.session_state.uploaded_file_names["FR"]}</div>',
-                        unsafe_allow_html=True
-                    )
-        
         # Only show file uploaders if not processing
         if st.session_state.processing_status['status'] != 'processing':
             # File uploaders in columns
