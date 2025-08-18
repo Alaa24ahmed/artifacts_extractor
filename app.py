@@ -958,9 +958,9 @@ def display_results(output_dir=None):
                                             break
                                 
                                 if results_file:
-                                    # Load and save artifacts
-                                    with open(results_file, 'r', encoding='utf-8') as f:
-                                        artifacts_data = json.load(f)
+                                    # Use the already corrected artifacts data from display logic
+                                    # instead of reloading from file (which would have the wrong names)
+                                    artifacts_data = artifacts  # This already has the correct source document names
                                     
                                     # Calculate file hash for the processed files
                                     import hashlib

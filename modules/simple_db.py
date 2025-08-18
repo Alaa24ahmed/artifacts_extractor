@@ -299,19 +299,15 @@ class SimpleArtifactDB:
                 logger.info(f"Page {page_num} already cached, skipping save")
                 return True
             
-            # Get the actual source document name from doc_group
-            actual_source_document = None
-            for lang, filename in doc_group.items():
-                if filename:  # Use the first available document name as source
-                    actual_source_document = filename
-                    break
-            
             # Map and save each artifact
             saved_count = 0
             for artifact in artifacts:
+                # Use the source_document from the artifact itself (which is already correct in the UI)
+                artifact_source_document = artifact.get("source_document", "")
+                
                 mapped_artifact = self._map_artifact_to_new_schema(
                     artifact, page_cache_key, page_num, ocr_model, 
-                    extraction_model, processing_params_hash, actual_source_document
+                    extraction_model, processing_params_hash, artifact_source_document
                 )
                 
                 # Add file hash
