@@ -301,6 +301,15 @@ if 'mistral_api_key' not in st.session_state:
 if 'google_api_key' not in st.session_state:
     st.session_state.google_api_key = ""
 
+# Initialize last processing parameters for database saving
+if 'last_processing_params' not in st.session_state:
+    st.session_state.last_processing_params = {
+        'ocr_model': 'gpt-4o',
+        'extraction_model': 'gpt-4o',
+        'base_model': 'gpt-4o',
+        'correction_thresholds': {"EN": 0.05, "AR": 0.10, "FR": 0.07}
+    }
+
 # Files for communication between threads and UI
 STATUS_FILE = os.path.join(st.session_state.temp_dir, "processing_status.json")
 COMPLETION_MARKER = os.path.join(st.session_state.temp_dir, "processing_completed")
@@ -994,16 +1003,29 @@ def display_results(output_dir=None):
                                                     artifacts_by_page[page_num] = []
                                                 artifacts_by_page[page_num].append(artifact)
                                             
-                                            # Save each page separately with default parameters
+                                            # Save each page separately with actual user-selected models
                                             doc_group = {"EN": f"imported_file_{file_hash[:8]}.pdf"}
-                                            default_model = "gpt-4o"
-                                            default_thresholds = {"EN": 0.05, "AR": 0.10, "FR": 0.07}
+                                            
+                                            # Use the actual models selected by the user from session state
+                                            if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:
+                                                params = st.session_state.last_processing_params
+                                                actual_ocr_model = params.get('ocr_model', 'gpt-4o')
+                                                actual_extraction_model = params.get('extraction_model', 'gpt-4o')
+                                                actual_thresholds = params.get('correction_thresholds', {"EN": 0.05, "AR": 0.10, "FR": 0.07})
+                                            else:
+                                                # Fallback to defaults if no parameters stored
+                                                actual_ocr_model = "gpt-4o"
+                                                actual_extraction_model = "gpt-4o"
+                                                actual_thresholds = {"EN": 0.05, "AR": 0.10, "FR": 0.07}
+                                            
+                                            # Debug: Log the models being saved
+                                            st.code(f"💾 Saving with OCR model: {actual_ocr_model}, Extraction model: {actual_extraction_model}")
                                             
                                             total_saved = 0
                                             for page_num, page_artifacts in artifacts_by_page.items():
                                                 success = db.save_page_artifacts(
                                                     doc_group, page_num, page_artifacts,
-                                                    default_model, default_model, default_thresholds
+                                                    actual_ocr_model, actual_extraction_model, actual_thresholds
                                                 )
                                                 if success:
                                                     total_saved += len(page_artifacts)
@@ -1015,7 +1037,7 @@ def display_results(output_dir=None):
                                                 # Save run statistics
                                                 db.save_run_statistics(
                                                     doc_group, 1, len(artifacts_by_page), 
-                                                    default_model, default_model, default_thresholds,
+                                                    actual_ocr_model, actual_extraction_model, actual_thresholds,
                                                     total_saved, 0, len(artifacts_by_page)
                                                 )
                                             else:
@@ -1311,6 +1333,13 @@ def main():
             # Map display value back to internal value
             extraction_model = next(option[1] for option in extraction_model_options if option[0] == extraction_display_value)
         
+        # Store processing parameters in session state for later use
+        st.session_state.last_processing_params = {
+            'ocr_model': ocr_model,
+            'extraction_model': extraction_model,
+            'base_model': model
+        }
+        
         # Initialize default values before the expander
         start_page = 1
         end_page = None
@@ -1492,6 +1521,13 @@ def main():
                 # Reset and reconfigure logging (this clears previous logs)
                 st.session_state.logger = setup_logging()
                 st.session_state.logger.info("Starting new processing run")
+                
+                # Store final processing parameters for later use (e.g., database saving)
+                st.session_state.last_processing_params.update({
+                    'correction_thresholds': correction_thresholds.copy(),
+                    'start_page': start_page,
+                    'end_page': end_page
+                })
                 
                 # Create document group
                 doc_group = {
