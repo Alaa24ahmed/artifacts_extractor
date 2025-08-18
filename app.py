@@ -922,18 +922,10 @@ def display_results(output_dir=None):
                         try:
                             db = get_simple_db()
                             
-                            # Debug database initialization
-                            st.markdown("**🔍 Database Debug:**")
-                            st.code(f"Database object: {db}")
-                            st.code(f"Database enabled: {db.enabled if db else 'None'}")
-                            
                             if db is None:
                                 st.warning("Database not configured. Please check your .env file with Supabase credentials.")
                             elif not db.enabled:
-                                st.warning("Database disabled. Check environment variables:")
-                                st.code(f"SUPABASE_URL: {'SET' if os.getenv('SUPABASE_URL') else 'NOT SET'}")
-                                st.code(f"SUPABASE_ANON_KEY: {'SET' if os.getenv('SUPABASE_ANON_KEY') else 'NOT SET'}")
-                                st.code(f"ENABLE_SUPABASE: {os.getenv('ENABLE_SUPABASE', 'NOT SET')}")
+                                st.warning("Database disabled. Please check your environment variables.")
                             else:
                                 # Use the same logic as display_results to find files
                                 results_file = None
@@ -970,23 +962,6 @@ def display_results(output_dir=None):
                                     with open(results_file, 'r', encoding='utf-8') as f:
                                         artifacts_data = json.load(f)
                                     
-                                    # Debug: show the data structure
-                                    st.markdown("**🔍 Data Structure Debug:**")
-                                    st.code(f"Data type: {type(artifacts_data).__name__}")
-                                    
-                                    if isinstance(artifacts_data, dict):
-                                        st.code(f"Keys in artifacts_data: {list(artifacts_data.keys())}")
-                                        if 'artifacts' in artifacts_data:
-                                            st.code(f"Number of artifacts: {len(artifacts_data['artifacts'])}")
-                                        else:
-                                            st.code("'artifacts' key not found in data")
-                                    elif isinstance(artifacts_data, list):
-                                        st.code(f"List with {len(artifacts_data)} items")
-                                        if artifacts_data:
-                                            st.code(f"First item type: {type(artifacts_data[0]).__name__}")
-                                    
-                                    st.code(f"Sample data: {str(artifacts_data)[:200]}...")
-                                    
                                     # Calculate file hash for the processed files
                                     import hashlib
                                     file_content = json.dumps(artifacts_data, sort_keys=True)
@@ -1018,9 +993,6 @@ def display_results(output_dir=None):
                                                 actual_extraction_model = "gpt-4o"
                                                 actual_thresholds = {"EN": 0.05, "AR": 0.10, "FR": 0.07}
                                             
-                                            # Debug: Log the models being saved
-                                            st.code(f"💾 Saving with OCR model: {actual_ocr_model}, Extraction model: {actual_extraction_model}")
-                                            
                                             total_saved = 0
                                             for page_num, page_artifacts in artifacts_by_page.items():
                                                 success = db.save_page_artifacts(
@@ -1047,10 +1019,6 @@ def display_results(output_dir=None):
                                                 if actual_end_page is None:
                                                     actual_end_page = max(artifacts_by_page.keys()) if artifacts_by_page else actual_start_page
                                                 
-                                                # Debug: Log the page range being saved
-                                                st.code(f"📊 Saving run stats - Start page: {actual_start_page}, End page: {actual_end_page}")
-                                                st.code(f"📊 File hash: {file_hash[:16]}...")
-                                                
                                                 db.save_run_statistics(
                                                     doc_group, actual_start_page, actual_end_page, 
                                                     actual_ocr_model, actual_extraction_model, actual_thresholds,
@@ -1059,88 +1027,18 @@ def display_results(output_dir=None):
                                                 )
                                             else:
                                                 st.error("❌ Failed to save artifacts to database.")
-                                                # Debug info
-                                                st.markdown("**🔍 Debug Info:**")
-                                                st.code(f"Database enabled: {db.enabled}")
-                                                st.code(f"File hash: {file_hash[:20]}...")
-                                                if isinstance(artifacts_data, list):
-                                                    st.code(f"Artifacts count: {len(artifacts_data)}")
-                                                elif isinstance(artifacts_data, dict):
-                                                    st.code(f"Artifacts count: {len(artifacts_data.get('artifacts', []))}")
-                                                else:
-                                                    st.code(f"Unexpected data type: {type(artifacts_data)}")
                                         except Exception as save_error:
                                             st.error(f"❌ Error during save: {str(save_error)}")
-                                            st.code(f"Error details: {save_error}")
                                 else:
-                                    # Debug: show what files are available
                                     st.error("❌ No artifact results found to save.")
-                                    
-                                    # Show detailed debugging info
-                                    st.markdown("**🔍 Debug Information:**")
-                                    st.code(f"Output directory: {output_dir}")
-                                    
-                                    if output_dir and os.path.exists(output_dir):
-                                        all_files = []
-                                        for root, dirs, files in os.walk(output_dir):
-                                            for file in files:
-                                                file_path = os.path.join(root, file)
-                                                rel_path = os.path.relpath(file_path, output_dir)
-                                                all_files.append(rel_path)
-                                        
-                                        if all_files:
-                                            st.markdown("**📁 All files in output directory:**")
-                                            for file in sorted(all_files):
-                                                st.text(f"  {file}")
-                                        else:
-                                            st.text("No files found in output directory")
-                                    else:
-                                        st.text(f"Output directory does not exist: {output_dir}")
-                                    
-                                    # Also check temp directory
-                                    st.markdown("**🔍 Checking temp directory:**")
-                                    st.code(f"Temp directory: {st.session_state.temp_dir}")
-                                    temp_json_files = []
-                                    if hasattr(st.session_state, 'temp_dir') and os.path.exists(st.session_state.temp_dir):
-                                        for root, dirs, files in os.walk(st.session_state.temp_dir):
-                                            for file in files:
-                                                if file.endswith('.json'):
-                                                    file_path = os.path.join(root, file)
-                                                    rel_path = os.path.relpath(file_path, st.session_state.temp_dir)
-                                                    temp_json_files.append(rel_path)
-                                    
-                                    if temp_json_files:
-                                        st.markdown("**📁 JSON files in temp directory:**")
-                                        for file in sorted(temp_json_files):
-                                            st.text(f"  {file}")
-                                    else:
-                                        st.text("No JSON files found in temp directory")
                         except Exception as e:
                             st.error(f"Error saving to database: {str(e)}")
-                            st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
                 
         except Exception as e:
             st.markdown(f'<div class="error-card">Error displaying results: {str(e)}</div>', unsafe_allow_html=True)
-            st.markdown(f'<div class="debug-info">Error details: {traceback.format_exc()}</div>', unsafe_allow_html=True)
     else:
         with st.container():
             st.markdown('<div class="warning-card">No artifact results found. Processing may have failed.</div>', unsafe_allow_html=True)
-            
-            # Debug information - show what's in the directory
-            all_files = []
-            if output_dir and os.path.exists(output_dir):
-                for root, dirs, files in os.walk(output_dir):
-                    rel_path = os.path.relpath(root, output_dir)
-                    if files:
-                        all_files.append(f"📁 {rel_path}/")
-                        for file in files:
-                            all_files.append(f"   📄 {file}")
-                
-                if all_files:
-                    st.markdown('<div class="debug-info">Files found in output directory:<br>' + 
-                            '<br>'.join(all_files[:30]) + 
-                            (f'<br>...and {len(all_files)-30} more' if len(all_files) > 30 else '') + 
-                            '</div>', unsafe_allow_html=True)
 
 def format_time(seconds):
     """Format seconds into a readable time string"""
