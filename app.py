@@ -1215,7 +1215,7 @@ def main():
             ("Gemini 2.5 Flash", "gemini")
         ]
         
-        # OCR Model and API Key
+        # OCR Model
         with model_col1:
             st.markdown("<p><b>OCR Model</b></p>", unsafe_allow_html=True)
             ocr_display_value = st.selectbox(
@@ -1228,43 +1228,8 @@ def main():
             )
             # Map display value back to internal value
             ocr_model = next(option[1] for option in ocr_model_options if option[0] == ocr_display_value)
-            
-            # Conditional API key for OCR model
-            if ocr_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"]:
-                st.markdown("<p><b>OpenAI API Key</b> (required for GPT models)</p>", unsafe_allow_html=True)
-                openai_key = st.text_input("OpenAI API Key", type="password", 
-                                         value=st.session_state.openai_api_key,
-                                         disabled=st.session_state.processing_status['status'] == 'processing',
-                                         placeholder="Enter your OpenAI API key",
-                                         key="openai_key_input_ocr",
-                                         label_visibility="collapsed")
-                if openai_key:
-                    st.session_state.openai_api_key = openai_key
-                    os.environ["OPENAI_API_KEY"] = openai_key
-            elif ocr_model == "mistral-ocr":
-                st.markdown("<p><b>Mistral API Key</b> (required for Mistral OCR)</p>", unsafe_allow_html=True)
-                mistral_key = st.text_input("Mistral API Key", type="password",
-                                          value=st.session_state.mistral_api_key,
-                                          disabled=st.session_state.processing_status['status'] == 'processing',
-                                          placeholder="Enter your Mistral API key",
-                                          key="mistral_key_input_ocr",
-                                          label_visibility="collapsed")
-                if mistral_key:
-                    st.session_state.mistral_api_key = mistral_key
-                    os.environ["MISTRAL_API_KEY"] = mistral_key
-            elif ocr_model == "gemini":
-                st.markdown("<p><b>Google API Key</b> (required for Gemini 2.5 Flash)</p>", unsafe_allow_html=True)
-                google_key = st.text_input("Google API Key", type="password",
-                                        value=st.session_state.google_api_key,
-                                        disabled=st.session_state.processing_status['status'] == 'processing',
-                                        placeholder="Enter your Google API key for Gemini 2.5 Flash",
-                                        key="google_key_input_ocr",
-                                        label_visibility="collapsed")
-                if google_key:
-                    st.session_state.google_api_key = google_key
-                    os.environ["GOOGLE_API_KEY"] = google_key
         
-        # Extraction Model and API Key
+        # Extraction Model
         with model_col2:
             st.markdown("<p><b>Extraction Model</b></p>", unsafe_allow_html=True)
             extraction_display_value = st.selectbox(
@@ -1277,30 +1242,57 @@ def main():
             )
             # Map display value back to internal value
             extraction_model = next(option[1] for option in extraction_model_options if option[0] == extraction_display_value)
-            
-            # Conditional API key for Extraction model
-            if extraction_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"]:
-                st.markdown("<p><b>OpenAI API Key</b> (required for GPT models)</p>", unsafe_allow_html=True)
-                openai_key_extraction = st.text_input("OpenAI API Key", type="password", 
-                                                     value=st.session_state.openai_api_key,
-                                                     disabled=st.session_state.processing_status['status'] == 'processing',
-                                                     placeholder="Enter your OpenAI API key",
-                                                     key="openai_key_input_extraction",
-                                                     label_visibility="collapsed")
-                if openai_key_extraction:
-                    st.session_state.openai_api_key = openai_key_extraction
-                    os.environ["OPENAI_API_KEY"] = openai_key_extraction
-            elif extraction_model == "gemini":
-                st.markdown("<p><b>Google API Key</b> (required for Gemini 2.5 Flash)</p>", unsafe_allow_html=True)
-                google_key_extraction = st.text_input("Google API Key", type="password",
-                                                     value=st.session_state.google_api_key,
-                                                     disabled=st.session_state.processing_status['status'] == 'processing',
-                                                     placeholder="Enter your Google API key for Gemini 2.5 Flash",
-                                                     key="google_key_input_extraction",
-                                                     label_visibility="collapsed")
-                if google_key_extraction:
-                    st.session_state.google_api_key = google_key_extraction
-                    os.environ["GOOGLE_API_KEY"] = google_key_extraction
+        
+        # Smart API Key Management - determine which keys are needed
+        needs_openai = (ocr_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"] or 
+                       extraction_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"])
+        needs_mistral = ocr_model == "mistral-ocr"
+        needs_google = (ocr_model == "gemini" or extraction_model == "gemini")
+        
+        # Display API keys based on what's needed
+        api_key_cols = st.columns(3)
+        
+        # OpenAI API Key (if any GPT model is selected)
+        if needs_openai:
+            with api_key_cols[0]:
+                st.markdown("<p><b>OpenAI API Key</b> (for GPT models)</p>", unsafe_allow_html=True)
+                openai_key = st.text_input("OpenAI API Key", type="password", 
+                                         value=st.session_state.openai_api_key,
+                                         disabled=st.session_state.processing_status['status'] == 'processing',
+                                         placeholder="Enter your OpenAI API key",
+                                         key="openai_key_input",
+                                         label_visibility="collapsed")
+                if openai_key:
+                    st.session_state.openai_api_key = openai_key
+                    os.environ["OPENAI_API_KEY"] = openai_key
+        
+        # Mistral API Key (if Mistral OCR is selected)
+        if needs_mistral:
+            with api_key_cols[1]:
+                st.markdown("<p><b>Mistral API Key</b> (for Mistral OCR)</p>", unsafe_allow_html=True)
+                mistral_key = st.text_input("Mistral API Key", type="password",
+                                          value=st.session_state.mistral_api_key,
+                                          disabled=st.session_state.processing_status['status'] == 'processing',
+                                          placeholder="Enter your Mistral API key",
+                                          key="mistral_key_input",
+                                          label_visibility="collapsed")
+                if mistral_key:
+                    st.session_state.mistral_api_key = mistral_key
+                    os.environ["MISTRAL_API_KEY"] = mistral_key
+        
+        # Google API Key (if Gemini is selected for either model)
+        if needs_google:
+            with api_key_cols[2]:
+                st.markdown("<p><b>Google API Key</b> (for Gemini models)</p>", unsafe_allow_html=True)
+                google_key = st.text_input("Google API Key", type="password",
+                                        value=st.session_state.google_api_key,
+                                        disabled=st.session_state.processing_status['status'] == 'processing',
+                                        placeholder="Enter your Google API key",
+                                        key="google_key_input",
+                                        label_visibility="collapsed")
+                if google_key:
+                    st.session_state.google_api_key = google_key
+                    os.environ["GOOGLE_API_KEY"] = google_key
         
         # Store processing parameters in session state for later use
         st.session_state.last_processing_params = {
