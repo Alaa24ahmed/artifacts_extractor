@@ -629,8 +629,6 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
         logger.error("No English document provided. English is required for this workflow.")
         return
     
-    logger.info(f"🔍 Checking page-level cache for pages {start_page}-{end_page}")
-    
     # Handle None end_page by determining actual document length
     if end_page is None:
         # Import here to avoid circular import
@@ -645,6 +643,8 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
             actual_end_page = 9999
     else:
         actual_end_page = end_page
+    
+    logger.info(f"🔍 Checking page-level cache for pages {start_page}-{actual_end_page}")
     
     # Check page-level cache
     cached_artifacts, missing_pages, cache_stats = db.check_page_level_cache(
@@ -677,7 +677,7 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
         # Save run statistics
         if save_to_db:
             db.save_run_statistics(
-                doc_group, start_page, end_page, actual_ocr_model, actual_extraction_model,
+                doc_group, start_page, actual_end_page, actual_ocr_model, actual_extraction_model,
                 correction_thresholds, len(cached_artifacts), cache_stats["cached_pages"], 0
             )
         
@@ -797,7 +797,7 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
     # Save run statistics
     if save_to_db:
         db.save_run_statistics(
-            doc_group, start_page, end_page, actual_ocr_model, actual_extraction_model,
+            doc_group, start_page, actual_end_page, actual_ocr_model, actual_extraction_model,
             correction_thresholds, len(final_artifacts), cache_stats["cached_pages"], len(missing_pages)
         )
     

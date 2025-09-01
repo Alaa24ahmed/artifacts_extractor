@@ -334,13 +334,17 @@ class SimpleArtifactDB:
             logger.error(f"Error saving page artifacts: {e}")
             return False
 
-    def save_run_statistics(self, doc_group: dict, start_page: int, end_page: int,
+    def save_run_statistics(self, doc_group: dict, start_page: int, end_page,
                           ocr_model: str, extraction_model: str, thresholds: dict,
                           total_artifacts: int, cached_pages: int, processed_pages: int, 
                           provided_file_hash: str = None) -> bool:
         """Save statistics for a complete processing run"""
         if not self.enabled:
             return False
+            
+        # Handle None end_page
+        if end_page is None:
+            end_page = 9999
             
         try:
             # Get main file hash - use provided hash if available, otherwise try to hash the file
