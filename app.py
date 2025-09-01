@@ -1405,6 +1405,10 @@ def main():
         if (ocr_model == "gemini" or extraction_model == "gemini") and not st.session_state.google_api_key:
             missing_keys.append("Google API Key")
         
+        # Add validation for page range
+        page_range_invalid = (not all_pages and end_page is not None and 
+                             start_page is not None and end_page < start_page)
+        
         # Warning about missing API keys - shown above the buttons
         if missing_keys:
             st.markdown(f'<div class="warning-card">Missing required API keys: {", ".join(missing_keys)}</div>', unsafe_allow_html=True)
@@ -1417,10 +1421,6 @@ def main():
         st.markdown('<div class="button-container">', unsafe_allow_html=True)
         
         # Process button - main button
-        # Add validation for page range
-        page_range_invalid = (not all_pages and end_page is not None and 
-                             start_page is not None and end_page < start_page)
-        
         process_disabled = (st.session_state.uploaded_file_paths['EN'] is None or 
                           st.session_state.processing_status['status'] == 'processing' or 
                           len(missing_keys) > 0 or 
