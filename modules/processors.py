@@ -606,6 +606,9 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
                                      correction_thresholds=None, prompts=None, csv_fields=None,
                                      ocr_model=None, extraction_model=None, save_to_db=True):
     """Process a set of multilingual documents with intelligent page-level caching."""
+    # Debug logging to trace the None issue
+    logger.info(f"🐛 DEBUG: Function called with start_page={start_page}, end_page={end_page}, type={type(end_page)}")
+    
     # Extract document base name
     base_name = os.path.basename(doc_group.get("EN", ""))
     base_name = os.path.splitext(base_name)[0]
@@ -630,9 +633,11 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
         return
     
     # Handle None end_page by determining actual document length
+    logger.info(f"🐛 DEBUG: About to handle None check - end_page={end_page}, is None: {end_page is None}")
     if end_page is None:
         # Import here to avoid circular import
         import fitz
+        logger.info(f"🐛 DEBUG: end_page is None, determining actual page count from PDF")
         try:
             doc = fitz.open(en_file)
             actual_end_page = len(doc)
@@ -642,6 +647,7 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
             logger.warning(f"Could not determine document length: {e}, using large number")
             actual_end_page = 9999
     else:
+        logger.info(f"🐛 DEBUG: end_page is not None, using value: {end_page}")
         actual_end_page = end_page
     
     logger.info(f"🔍 Checking page-level cache for pages {start_page}-{actual_end_page}")
