@@ -1342,6 +1342,7 @@ def main():
                                   value=start_page,
                                   disabled=True,
                                   key="end_page_disabled",
+                                  help="Will process until the end of the document",
                                   label_visibility="visible")
                     end_page = None  # Use None to indicate all pages
                 else:
@@ -1408,13 +1409,22 @@ def main():
         if missing_keys:
             st.markdown(f'<div class="warning-card">Missing required API keys: {", ".join(missing_keys)}</div>', unsafe_allow_html=True)
         
+        # Warning about invalid page range
+        if page_range_invalid:
+            st.markdown('<div class="warning-card">Invalid page range: End page must be greater than or equal to start page.</div>', unsafe_allow_html=True)
+        
         # Process and Reset buttons in centered flex container
         st.markdown('<div class="button-container">', unsafe_allow_html=True)
         
         # Process button - main button
+        # Add validation for page range
+        page_range_invalid = (not all_pages and end_page is not None and 
+                             start_page is not None and end_page < start_page)
+        
         process_disabled = (st.session_state.uploaded_file_paths['EN'] is None or 
                           st.session_state.processing_status['status'] == 'processing' or 
-                          len(missing_keys) > 0)
+                          len(missing_keys) > 0 or 
+                          page_range_invalid)
         
         # Show different button states based on processing status
         if st.session_state.processing_status['status'] == 'processing':
@@ -1455,7 +1465,7 @@ def main():
                 st.session_state.last_processing_params.update({
                     'correction_thresholds': correction_thresholds.copy(),
                     'start_page': start_page,
-                    'end_page': end_page
+                    'end_page': end_page if end_page is not None else 9999  # Use 9999 for "till end"
                 })
                 
                 # Create document group
@@ -1504,6 +1514,9 @@ def main():
                 }
                 
                 # Start processing in a thread
+                # Convert None end_page to None for proper handling in backend
+                processed_end_page = end_page  # Keep None as is - the backend should handle it
+                
                 thread = threading.Thread(
                     target=process_documents,
                     kwargs={
@@ -1511,7 +1524,7 @@ def main():
                         'output_dir': output_dir,
                         'model': model,
                         'start_page': start_page,
-                        'end_page': end_page,
+                        'end_page': processed_end_page,
                         'correction_thresholds': correction_thresholds,
                         'prompts': prompts,
                         'csv_fields': MULTILINGUAL_CSV_FIELDS,
