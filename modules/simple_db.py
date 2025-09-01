@@ -90,6 +90,11 @@ class SimpleArtifactDB:
             return [], [], {"cached_pages": 0, "missing_pages": 0}
             
         try:
+            # FINAL SAFETY CHECK: Handle None end_page even if it somehow got through
+            if end_page is None:
+                logger.warning(f"🚨 EMERGENCY: end_page is None in cache function, converting to 9999")
+                end_page = 9999
+                
             requested_pages = list(range(start_page, end_page + 1))
             cached_artifacts = []
             missing_pages = []
@@ -100,6 +105,7 @@ class SimpleArtifactDB:
             ).hexdigest()
             
             logger.info(f"🔍 Checking cache for pages {start_page}-{end_page}")
+            logger.info(f"🚨 SIMPLE_DB DEBUG: end_page={end_page}, type={type(end_page)}")
             
             for page_num in requested_pages:
                 # Create page cache key
