@@ -1215,7 +1215,7 @@ def main():
             ("Gemini 2.5 Flash", "gemini")
         ]
         
-        # OCR Model
+        # OCR Model and its API Key
         with model_col1:
             st.markdown("<p><b>OCR Model</b></p>", unsafe_allow_html=True)
             ocr_display_value = st.selectbox(
@@ -1228,8 +1228,43 @@ def main():
             )
             # Map display value back to internal value
             ocr_model = next(option[1] for option in ocr_model_options if option[0] == ocr_display_value)
+            
+            # Show API key for OCR model with guiding message
+            if ocr_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"]:
+                st.markdown('<div style="margin-top: 10px; padding: 8px; background-color: #e8f4fd; border-left: 3px solid #4169E1; border-radius: 3px;"><small>🔑 This OCR model requires an OpenAI API key</small></div>', unsafe_allow_html=True)
+                openai_key_ocr = st.text_input("OpenAI API Key", type="password", 
+                                             value=st.session_state.openai_api_key,
+                                             disabled=st.session_state.processing_status['status'] == 'processing',
+                                             placeholder="Enter your OpenAI API key",
+                                             key="openai_key_ocr",
+                                             label_visibility="collapsed")
+                if openai_key_ocr:
+                    st.session_state.openai_api_key = openai_key_ocr
+                    os.environ["OPENAI_API_KEY"] = openai_key_ocr
+            elif ocr_model == "mistral-ocr":
+                st.markdown('<div style="margin-top: 10px; padding: 8px; background-color: #fff3e0; border-left: 3px solid #ff9800; border-radius: 3px;"><small>🔑 This OCR model requires a Mistral API key</small></div>', unsafe_allow_html=True)
+                mistral_key = st.text_input("Mistral API Key", type="password",
+                                          value=st.session_state.mistral_api_key,
+                                          disabled=st.session_state.processing_status['status'] == 'processing',
+                                          placeholder="Enter your Mistral API key",
+                                          key="mistral_key_ocr",
+                                          label_visibility="collapsed")
+                if mistral_key:
+                    st.session_state.mistral_api_key = mistral_key
+                    os.environ["MISTRAL_API_KEY"] = mistral_key
+            elif ocr_model == "gemini":
+                st.markdown('<div style="margin-top: 10px; padding: 8px; background-color: #e8f5e9; border-left: 3px solid #4caf50; border-radius: 3px;"><small>🔑 This OCR model requires a Google API key</small></div>', unsafe_allow_html=True)
+                google_key_ocr = st.text_input("Google API Key", type="password",
+                                            value=st.session_state.google_api_key,
+                                            disabled=st.session_state.processing_status['status'] == 'processing',
+                                            placeholder="Enter your Google API key for Gemini",
+                                            key="google_key_ocr",
+                                            label_visibility="collapsed")
+                if google_key_ocr:
+                    st.session_state.google_api_key = google_key_ocr
+                    os.environ["GOOGLE_API_KEY"] = google_key_ocr
         
-        # Extraction Model
+        # Extraction Model and its API Key
         with model_col2:
             st.markdown("<p><b>Extraction Model</b></p>", unsafe_allow_html=True)
             extraction_display_value = st.selectbox(
@@ -1242,69 +1277,30 @@ def main():
             )
             # Map display value back to internal value
             extraction_model = next(option[1] for option in extraction_model_options if option[0] == extraction_display_value)
-        
-        # Smart API Key Management - determine which keys are needed
-        needs_openai = (ocr_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"] or 
-                       extraction_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"])
-        needs_mistral = ocr_model == "mistral-ocr"
-        needs_google = (ocr_model == "gemini" or extraction_model == "gemini")
-        
-        # Collect required API keys
-        required_keys = []
-        if needs_openai:
-            required_keys.append("openai")
-        if needs_mistral:
-            required_keys.append("mistral")
-        if needs_google:
-            required_keys.append("google")
-        
-        # Display API keys in 2 columns if any are needed
-        if required_keys:
-            api_key_col1, api_key_col2 = st.columns(2)
             
-            # OpenAI API Key (if any GPT model is selected)
-            if "openai" in required_keys:
-                with api_key_col1:
-                    st.markdown("<p><b>OpenAI API Key</b> (for GPT models)</p>", unsafe_allow_html=True)
-                    openai_key = st.text_input("OpenAI API Key", type="password", 
-                                             value=st.session_state.openai_api_key,
-                                             disabled=st.session_state.processing_status['status'] == 'processing',
-                                             placeholder="Enter your OpenAI API key",
-                                             key="openai_key_input",
-                                             label_visibility="collapsed")
-                    if openai_key:
-                        st.session_state.openai_api_key = openai_key
-                        os.environ["OPENAI_API_KEY"] = openai_key
-            
-            # Mistral API Key (if Mistral OCR is selected)
-            if "mistral" in required_keys:
-                target_col = api_key_col2 if "openai" in required_keys else api_key_col1
-                with target_col:
-                    st.markdown("<p><b>Mistral API Key</b> (for Mistral OCR)</p>", unsafe_allow_html=True)
-                    mistral_key = st.text_input("Mistral API Key", type="password",
-                                              value=st.session_state.mistral_api_key,
-                                              disabled=st.session_state.processing_status['status'] == 'processing',
-                                              placeholder="Enter your Mistral API key",
-                                              key="mistral_key_input",
-                                              label_visibility="collapsed")
-                    if mistral_key:
-                        st.session_state.mistral_api_key = mistral_key
-                        os.environ["MISTRAL_API_KEY"] = mistral_key
-            
-            # Google API Key (if Gemini is selected for either model)
-            if "google" in required_keys:
-                target_col = api_key_col1 if "openai" not in required_keys else api_key_col2
-                with target_col:
-                    st.markdown("<p><b>Google API Key</b> (for Gemini models)</p>", unsafe_allow_html=True)
-                    google_key = st.text_input("Google API Key", type="password",
-                                            value=st.session_state.google_api_key,
-                                            disabled=st.session_state.processing_status['status'] == 'processing',
-                                            placeholder="Enter your Google API key",
-                                            key="google_key_input",
-                                            label_visibility="collapsed")
-                    if google_key:
-                        st.session_state.google_api_key = google_key
-                        os.environ["GOOGLE_API_KEY"] = google_key
+            # Show API key for Extraction model with guiding message
+            if extraction_model in ["gpt-4o", "gpt-4", "gpt-4o-mini"]:
+                st.markdown('<div style="margin-top: 10px; padding: 8px; background-color: #e8f4fd; border-left: 3px solid #4169E1; border-radius: 3px;"><small>🔑 This extraction model requires an OpenAI API key</small></div>', unsafe_allow_html=True)
+                openai_key_extraction = st.text_input("OpenAI API Key", type="password", 
+                                                     value=st.session_state.openai_api_key,
+                                                     disabled=st.session_state.processing_status['status'] == 'processing',
+                                                     placeholder="Enter your OpenAI API key",
+                                                     key="openai_key_extraction",
+                                                     label_visibility="collapsed")
+                if openai_key_extraction:
+                    st.session_state.openai_api_key = openai_key_extraction
+                    os.environ["OPENAI_API_KEY"] = openai_key_extraction
+            elif extraction_model == "gemini":
+                st.markdown('<div style="margin-top: 10px; padding: 8px; background-color: #e8f5e9; border-left: 3px solid #4caf50; border-radius: 3px;"><small>🔑 This extraction model requires a Google API key</small></div>', unsafe_allow_html=True)
+                google_key_extraction = st.text_input("Google API Key", type="password",
+                                                     value=st.session_state.google_api_key,
+                                                     disabled=st.session_state.processing_status['status'] == 'processing',
+                                                     placeholder="Enter your Google API key for Gemini",
+                                                     key="google_key_extraction",
+                                                     label_visibility="collapsed")
+                if google_key_extraction:
+                    st.session_state.google_api_key = google_key_extraction
+                    os.environ["GOOGLE_API_KEY"] = google_key_extraction
         
         # Store processing parameters in session state for later use
         st.session_state.last_processing_params = {
