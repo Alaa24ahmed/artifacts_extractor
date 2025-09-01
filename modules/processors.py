@@ -631,14 +631,29 @@ def process_multilingual_document_set(doc_group, output_dir, model, start_page=1
     
     logger.info(f"🔍 Checking page-level cache for pages {start_page}-{end_page}")
     
+    # Handle None end_page by determining actual document length
+    if end_page is None:
+        # Import here to avoid circular import
+        import fitz
+        try:
+            doc = fitz.open(en_file)
+            actual_end_page = len(doc)
+            doc.close()
+            logger.info(f"📄 Document has {actual_end_page} pages, processing from {start_page} to end")
+        except Exception as e:
+            logger.warning(f"Could not determine document length: {e}, using large number")
+            actual_end_page = 9999
+    else:
+        actual_end_page = end_page
+    
     # Check page-level cache
     cached_artifacts, missing_pages, cache_stats = db.check_page_level_cache(
-        doc_group, start_page, end_page, 
+        doc_group, start_page, actual_end_page, 
         actual_ocr_model, actual_extraction_model, correction_thresholds
     )
     
     # Report cache analysis
-    total_pages = end_page - start_page + 1
+    total_pages = actual_end_page - start_page + 1
     if cache_stats["cached_pages"] > 0:
         logger.info(f"✅ Cache hit: {cache_stats['cached_pages']}/{total_pages} pages found in cache")
         logger.info(f"📦 Retrieved {cache_stats['total_cached_artifacts']} cached artifacts")

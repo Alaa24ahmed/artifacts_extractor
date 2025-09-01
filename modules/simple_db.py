@@ -65,7 +65,7 @@ class SimpleArtifactDB:
             logger.error(f"Error hashing file {file_path}: {e}")
             return ""
     
-    def check_page_level_cache(self, doc_group: dict, start_page: int, end_page: int,
+    def check_page_level_cache(self, doc_group: dict, start_page: int, end_page,
                               ocr_model: str, extraction_model: str, thresholds: dict) -> tuple:
         """
         Check cache for each page in the requested range
@@ -73,6 +73,10 @@ class SimpleArtifactDB:
         Returns:
             tuple: (cached_artifacts, missing_pages, cache_stats)
         """
+        # Handle None end_page by setting to a large number (will be handled by actual processing)
+        if end_page is None:
+            end_page = 9999  # Large number to indicate "till end"
+            
         if not self.enabled:
             return [], list(range(start_page, end_page + 1)), {"cached_pages": 0, "missing_pages": end_page - start_page + 1}
         
@@ -154,6 +158,9 @@ class SimpleArtifactDB:
         except Exception as e:
             logger.error(f"Error checking page-level cache: {e}")
             # Fallback: treat all pages as missing
+            # Handle None end_page in fallback as well
+            if end_page is None:
+                end_page = 9999
             return [], list(range(start_page, end_page + 1)), {"cached_pages": 0, "missing_pages": end_page - start_page + 1}
     
     def _create_page_cache_key(self, doc_group: dict, page_num: int, ocr_model: str, 
