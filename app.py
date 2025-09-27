@@ -1188,6 +1188,28 @@ def main():
     
     # Debug info to troubleshoot API key loading
     with st.expander("🔍 Debug: API Key Loading Status", expanded=False):
+        st.write("**Raw secrets.toml debugging:**")
+        try:
+            st.write(f"- st.secrets available: {hasattr(st, 'secrets')}")
+            st.write(f"- st.secrets type: {type(st.secrets)}")
+            st.write(f"- All sections in st.secrets: {list(st.secrets.keys()) if st.secrets else 'None'}")
+            
+            # Try to access the raw secrets object
+            if hasattr(st, 'secrets'):
+                for section_name in st.secrets.keys():
+                    st.write(f"- Section '{section_name}': {list(st.secrets[section_name].keys()) if isinstance(st.secrets[section_name], dict) else 'Not a dict'}")
+                    
+            # Try direct access
+            try:
+                api_keys_direct = st.secrets["api_keys"]
+                st.write(f"- Direct access to api_keys worked: {bool(api_keys_direct)}")
+                st.write(f"- api_keys keys: {list(api_keys_direct.keys())}")
+            except Exception as e:
+                st.write(f"- Direct access to api_keys failed: {e}")
+                
+        except Exception as e:
+            st.write(f"- Error in raw debugging: {e}")
+        
         st.write("**Secrets.toml status:**")
         try:
             secrets_available = hasattr(st, 'secrets')
