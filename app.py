@@ -293,54 +293,15 @@ if 'display_logs' not in st.session_state:
 if 'last_log_position' not in st.session_state:
     st.session_state.last_log_position = 0
 
-# Initialize API keys in session state if they don't exist - with secrets.toml as defaults
-def load_api_key_from_secrets_and_env(key_name, session_key):
-    """Load API key from secrets.toml or environment variables"""
-    current_value = st.session_state.get(session_key, "")
-    if current_value:  # If already loaded, don't reload
-        return current_value
-    
-    # Try multiple sources in order
-    sources_to_try = []
-    
-    # Source 1: Streamlit secrets
-    try:
-        secrets_value = st.secrets.get("api_keys", {}).get(key_name, "")
-        if secrets_value and secrets_value != f"your_{key_name.lower()}_here":
-            sources_to_try.append(("secrets.toml", secrets_value))
-    except Exception as e:
-        print(f"Could not access secrets for {key_name}: {e}")
-    
-    # Source 2: Environment variables
-    try:
-        env_value = os.getenv(key_name, "")
-        if env_value and env_value != f"your_{key_name.lower()}_here":
-            sources_to_try.append(("environment", env_value))
-    except Exception as e:
-        print(f"Could not access environment for {key_name}: {e}")
-    
-    # Use the first valid source found
-    for source_name, value in sources_to_try:
-        if value:
-            st.session_state[session_key] = value
-            os.environ[key_name] = value
-            print(f"✅ Loaded {key_name} from {source_name} (length: {len(value)})")
-            return value
-    
-    # If no source found, set to empty
-    st.session_state[session_key] = ""
-    print(f"⚠️ No valid {key_name} found in any source")
-    return ""
+# Initialize API keys in session state if they don't exist
+if 'openai_api_key' not in st.session_state:
+    st.session_state.openai_api_key = ""
 
-# Force reload API keys if not in session state or if they're empty
-if 'openai_api_key' not in st.session_state or not st.session_state.openai_api_key:
-    load_api_key_from_secrets_and_env("OPENAI_API_KEY", "openai_api_key")
+if 'mistral_api_key' not in st.session_state:
+    st.session_state.mistral_api_key = ""
 
-if 'mistral_api_key' not in st.session_state or not st.session_state.mistral_api_key:
-    load_api_key_from_secrets_and_env("MISTRAL_API_KEY", "mistral_api_key")
-
-if 'google_api_key' not in st.session_state or not st.session_state.google_api_key:
-    load_api_key_from_secrets_and_env("GOOGLE_API_KEY", "google_api_key")
+if 'google_api_key' not in st.session_state:
+    st.session_state.google_api_key = ""
 
 # Initialize last processing parameters for database saving
 if 'last_processing_params' not in st.session_state:
@@ -1185,75 +1146,6 @@ def main():
     
     # App title and description
     st.markdown('<div class="title-container"><h1>🏛️ Multilingual Museum Artifact Extractor</h1></div>', unsafe_allow_html=True)
-    
-    # Debug info to troubleshoot API key loading
-    with st.expander("🔍 Debug: API Key Loading Status", expanded=False):
-        st.write("**Raw secrets.toml debugging:**")
-        try:
-            st.write(f"- st.secrets available: {hasattr(st, 'secrets')}")
-            st.write(f"- st.secrets type: {type(st.secrets)}")
-            st.write(f"- All sections in st.secrets: {list(st.secrets.keys()) if st.secrets else 'None'}")
-            
-            # Try to access the raw secrets object
-            if hasattr(st, 'secrets'):
-                for section_name in st.secrets.keys():
-                    st.write(f"- Section '{section_name}': {list(st.secrets[section_name].keys()) if isinstance(st.secrets[section_name], dict) else 'Not a dict'}")
-                    
-            # Try direct access
-            try:
-                api_keys_direct = st.secrets["api_keys"]
-                st.write(f"- Direct access to api_keys worked: {bool(api_keys_direct)}")
-                st.write(f"- api_keys keys: {list(api_keys_direct.keys())}")
-            except Exception as e:
-                st.write(f"- Direct access to api_keys failed: {e}")
-                
-        except Exception as e:
-            st.write(f"- Error in raw debugging: {e}")
-        
-        st.write("**Secrets.toml status:**")
-        try:
-            secrets_available = hasattr(st, 'secrets')
-            st.write(f"- st.secrets available: {secrets_available}")
-            
-            if secrets_available:
-                api_keys_section = st.secrets.get("api_keys", {})
-                st.write(f"- api_keys section found: {bool(api_keys_section)}")
-                st.write(f"- Keys in secrets: {list(api_keys_section.keys()) if api_keys_section else 'None'}")
-                
-                # Show partial keys for verification
-                for key_name in ["OPENAI_API_KEY", "MISTRAL_API_KEY", "GOOGLE_API_KEY"]:
-                    key_value = api_keys_section.get(key_name, "")
-                    if key_value:
-                        st.write(f"- {key_name}: {key_value[:8]}...{key_value[-4:]} (length: {len(key_value)})")
-                    else:
-                        st.write(f"- {key_name}: Not found")
-        except Exception as e:
-            st.write(f"Error accessing secrets: {e}")
-        
-        st.write("**Session state:**")
-        st.write(f"- openai_api_key: {'Set' if st.session_state.get('openai_api_key') else 'Empty'}")
-        st.write(f"- mistral_api_key: {'Set' if st.session_state.get('mistral_api_key') else 'Empty'}")
-        st.write(f"- google_api_key: {'Set' if st.session_state.get('google_api_key') else 'Empty'}")
-        
-        # Add buttons for manual control
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Force Reload API Keys"):
-                # Clear the API key session state and force reload
-                if 'openai_api_key' in st.session_state:
-                    del st.session_state.openai_api_key
-                if 'mistral_api_key' in st.session_state:
-                    del st.session_state.mistral_api_key  
-                if 'google_api_key' in st.session_state:
-                    del st.session_state.google_api_key
-                st.rerun()
-        
-        with col2:
-            if st.button("🗑️ Clear All Session"):
-                # Nuclear option - clear everything and reload
-                for key in list(st.session_state.keys()):
-                    del st.session_state[key]
-                st.rerun()
     
     st.markdown("""
     This application extracts detailed artifact information from multilingual museum catalogs.
