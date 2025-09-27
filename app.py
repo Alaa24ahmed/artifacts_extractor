@@ -298,12 +298,13 @@ if 'openai_api_key' not in st.session_state:
     # Try to load from secrets.toml first, then fallback to empty string
     try:
         default_openai_key = st.secrets.get("api_keys", {}).get("OPENAI_API_KEY", "")
-        st.session_state.openai_api_key = default_openai_key
         if default_openai_key and default_openai_key != "your_openai_key_here":
+            st.session_state.openai_api_key = default_openai_key
             os.environ["OPENAI_API_KEY"] = default_openai_key
-            print(f"✅ Loaded OpenAI API key from secrets.toml")
+            print(f"✅ Loaded OpenAI API key from secrets.toml (length: {len(default_openai_key)})")
         else:
             st.session_state.openai_api_key = ""
+            print(f"⚠️ No valid OpenAI key found in secrets.toml")
     except Exception as e:
         st.session_state.openai_api_key = ""
         print(f"⚠️ Could not load OpenAI key from secrets: {e}")
@@ -312,12 +313,13 @@ if 'mistral_api_key' not in st.session_state:
     # Try to load from secrets.toml first, then fallback to empty string
     try:
         default_mistral_key = st.secrets.get("api_keys", {}).get("MISTRAL_API_KEY", "")
-        st.session_state.mistral_api_key = default_mistral_key
         if default_mistral_key and default_mistral_key != "your_mistral_key_here":
+            st.session_state.mistral_api_key = default_mistral_key
             os.environ["MISTRAL_API_KEY"] = default_mistral_key
-            print(f"✅ Loaded Mistral API key from secrets.toml")
+            print(f"✅ Loaded Mistral API key from secrets.toml (length: {len(default_mistral_key)})")
         else:
             st.session_state.mistral_api_key = ""
+            print(f"⚠️ No valid Mistral key found in secrets.toml")
     except Exception as e:
         st.session_state.mistral_api_key = ""
         print(f"⚠️ Could not load Mistral key from secrets: {e}")
@@ -326,12 +328,13 @@ if 'google_api_key' not in st.session_state:
     # Try to load from secrets.toml first, then fallback to empty string
     try:
         default_google_key = st.secrets.get("api_keys", {}).get("GOOGLE_API_KEY", "")
-        st.session_state.google_api_key = default_google_key
         if default_google_key and default_google_key != "your_google_key_here":
+            st.session_state.google_api_key = default_google_key
             os.environ["GOOGLE_API_KEY"] = default_google_key
-            print(f"✅ Loaded Google API key from secrets.toml")
+            print(f"✅ Loaded Google API key from secrets.toml (length: {len(default_google_key)})")
         else:
             st.session_state.google_api_key = ""
+            print(f"⚠️ No valid Google key found in secrets.toml")
     except Exception as e:
         st.session_state.google_api_key = ""
         print(f"⚠️ Could not load Google key from secrets: {e}")
