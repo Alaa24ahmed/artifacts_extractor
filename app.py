@@ -293,13 +293,48 @@ if 'display_logs' not in st.session_state:
 if 'last_log_position' not in st.session_state:
     st.session_state.last_log_position = 0
 
-# Initialize API keys in session state if they don't exist
+# Initialize API keys in session state if they don't exist - with secrets.toml as defaults
 if 'openai_api_key' not in st.session_state:
-    st.session_state.openai_api_key = ""
+    # Try to load from secrets.toml first, then fallback to empty string
+    try:
+        default_openai_key = st.secrets.get("api_keys", {}).get("OPENAI_API_KEY", "")
+        st.session_state.openai_api_key = default_openai_key
+        if default_openai_key and default_openai_key != "your_openai_key_here":
+            os.environ["OPENAI_API_KEY"] = default_openai_key
+            print(f"✅ Loaded OpenAI API key from secrets.toml")
+        else:
+            st.session_state.openai_api_key = ""
+    except Exception as e:
+        st.session_state.openai_api_key = ""
+        print(f"⚠️ Could not load OpenAI key from secrets: {e}")
+
 if 'mistral_api_key' not in st.session_state:
-    st.session_state.mistral_api_key = ""
+    # Try to load from secrets.toml first, then fallback to empty string
+    try:
+        default_mistral_key = st.secrets.get("api_keys", {}).get("MISTRAL_API_KEY", "")
+        st.session_state.mistral_api_key = default_mistral_key
+        if default_mistral_key and default_mistral_key != "your_mistral_key_here":
+            os.environ["MISTRAL_API_KEY"] = default_mistral_key
+            print(f"✅ Loaded Mistral API key from secrets.toml")
+        else:
+            st.session_state.mistral_api_key = ""
+    except Exception as e:
+        st.session_state.mistral_api_key = ""
+        print(f"⚠️ Could not load Mistral key from secrets: {e}")
+
 if 'google_api_key' not in st.session_state:
-    st.session_state.google_api_key = ""
+    # Try to load from secrets.toml first, then fallback to empty string
+    try:
+        default_google_key = st.secrets.get("api_keys", {}).get("GOOGLE_API_KEY", "")
+        st.session_state.google_api_key = default_google_key
+        if default_google_key and default_google_key != "your_google_key_here":
+            os.environ["GOOGLE_API_KEY"] = default_google_key
+            print(f"✅ Loaded Google API key from secrets.toml")
+        else:
+            st.session_state.google_api_key = ""
+    except Exception as e:
+        st.session_state.google_api_key = ""
+        print(f"⚠️ Could not load Google key from secrets: {e}")
 
 # Initialize last processing parameters for database saving
 if 'last_processing_params' not in st.session_state:
