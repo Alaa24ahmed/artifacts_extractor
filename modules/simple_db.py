@@ -217,14 +217,16 @@ class SimpleArtifactDB:
     
     def _create_page_cache_key(self, doc_group: dict, page_num: int, ocr_model: str, 
                               extraction_model: str, thresholds: dict) -> str:
-        """Create unique cache key using content fingerprints instead of file paths"""
+        """UPDATED: Create unique cache key using content fingerprints instead of file paths"""
+        logger.warning(f"🚀 USING NEW CACHE METHOD v3.0 for page {page_num}")
+        
         content_hashes = {}
         
         for lang, file_path in doc_group.items():
             if file_path and os.path.exists(file_path):
                 # Use content fingerprint for fast, reliable identification
                 content_hashes[lang] = self._create_content_fingerprint(file_path)
-                logger.debug(f"Content fingerprint for {lang}: {content_hashes[lang][:16]}...")
+                logger.warning(f"🆕 Content fingerprint for {lang}: {content_hashes[lang][:16]}...")
             else:
                 # Fallback to original filename from session state
                 try:
@@ -232,20 +234,20 @@ class SimpleArtifactDB:
                         original_name = st.session_state.uploaded_file_names.get(lang, "")
                         if original_name:
                             content_hashes[lang] = hashlib.sha256(original_name.encode()).hexdigest()[:16]
-                            logger.debug(f"Using filename fallback for {lang}: {original_name}")
+                            logger.warning(f"🆕 Using filename fallback for {lang}: {original_name}")
                         else:
                             content_hashes[lang] = "missing"
-                            logger.warning(f"No file or filename available for {lang}")
+                            logger.warning(f"🆕 No file or filename available for {lang}")
                     else:
                         content_hashes[lang] = "missing"
-                        logger.debug(f"Session state not available for {lang}, using 'missing'")
+                        logger.warning(f"🆕 Session state not available for {lang}, using 'missing'")
                 except Exception as e:
-                    logger.warning(f"Error accessing session state for {lang}: {e}")
+                    logger.warning(f"🆕 Error accessing session state for {lang}: {e}")
                     content_hashes[lang] = "missing"
         
-        # Create parameter combination
+        # Create parameter combination - NOTE: Using 'content_hashes' NOT 'files'
         params = {
-            'content_hashes': content_hashes,
+            'content_hashes': content_hashes,  # THIS IS THE KEY CHANGE!
             'page': page_num,
             'ocr_model': ocr_model,
             'extraction_model': extraction_model,
@@ -256,10 +258,11 @@ class SimpleArtifactDB:
         params_str = json.dumps(params, sort_keys=True)
         cache_key = hashlib.sha256(params_str.encode()).hexdigest()
         
-        # Enhanced logging for debugging
-        logger.debug(f"🔍 Content fingerprints: {content_hashes}")
-        logger.debug(f"🔍 Cache key components: OCR={ocr_model}, Extract={extraction_model}, Page={page_num}")
-        logger.debug(f"🔍 Generated cache key: {cache_key[:16]}...")
+        # Enhanced logging for debugging - VERSION 3.0
+        logger.warning(f"🆕 NEW CACHE KEY METHOD v3.0 - Page {page_num} cache key: {cache_key}")
+        logger.warning(f"🆕 NEW CACHE PARAMS - Content hashes: {content_hashes}")
+        logger.warning(f"🆕 NEW CACHE PARAMS - Page: {page_num}, OCR: {ocr_model}, Extraction: {extraction_model}")
+        logger.warning(f"🆕 NEW CACHE PARAMS - Full params string: {params_str}")
         
         return cache_key
     
