@@ -157,19 +157,42 @@ class SimpleArtifactDB:
                     doc_group, page_num, ocr_model, extraction_model, thresholds
                 )
                 
-                logger.debug(f"🔍 Checking cache for page {page_num} with key: {page_cache_key[:16]}...")
+                logger.warning(f"🔍 DEBUGGING: Checking cache for page {page_num} with key: {page_cache_key}")
                 
                 # Check if this page exists in cache
                 try:
+                    logger.warning(f"🔍 DEBUGGING: About to call RPC check_page_cache with key: {page_cache_key}")
                     result = self.supabase_client.rpc("check_page_cache", {
                         "p_page_cache_key": page_cache_key
                     }).execute()
+                    logger.warning(f"🔍 DEBUGGING: RPC result data length: {len(result.data) if result.data else 0}")
+                    if result.data:
+                        logger.warning(f"🔍 DEBUGGING: RPC found data: {result.data[:1]}")  # Show first record
                 except Exception as rpc_error:
                     logger.warning(f"⚠️ RPC call failed for page {page_num}, falling back to direct query: {rpc_error}")
                     # Fallback to direct table query
                     result = self.supabase_client.table("artifacts").select("*").eq(
                         "page_cache_key", page_cache_key
                     ).execute()
+                    logger.warning(f"🔍 DEBUGGING: Direct query result data length: {len(result.data) if result.data else 0}")
+                    if result.data:
+                        logger.warning(f"🔍 DEBUGGING: Direct query found data: {result.data[:1]}")  # Show first record
+                
+                # Also check what entries exist for this page number to compare
+                try:
+                    existing_entries = self.supabase_client.table("artifacts").select("page_cache_key,ocr_model,extraction_model").eq(
+                        "page_number", page_num
+                    ).limit(5).execute()
+                    if existing_entries.data:
+                        logger.warning(f"🔍 DEBUGGING: Found {len(existing_entries.data)} existing entries for page {page_num}")
+                        for i, entry in enumerate(existing_entries.data):
+                            logger.warning(f"🔍 DEBUGGING: Entry {i+1}: key={entry.get('page_cache_key', '')[:32]}..., ocr={entry.get('ocr_model', '')}, extract={entry.get('extraction_model', '')}")
+                            if entry.get('page_cache_key') == page_cache_key:
+                                logger.warning(f"🎯 DEBUGGING: EXACT MATCH FOUND! Key matches perfectly")
+                    else:
+                        logger.warning(f"🔍 DEBUGGING: No existing entries found for page {page_num}")
+                except Exception as e:
+                    logger.warning(f"🔍 DEBUGGING: Error checking existing entries: {e}")
                 
                 if result.data:
                     # Convert database format back to original format
