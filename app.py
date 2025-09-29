@@ -981,11 +981,14 @@ def display_results(output_dir=None):
                                                 artifacts_by_page[page_num].append(artifact)
                                             
                                             # Save each page separately with actual user-selected models
-                                            # Use actual document name from session state
+                                            # Use actual file path from session state for proper content fingerprinting
+                                            actual_doc_path = st.session_state.uploaded_file_paths.get('EN', '')
                                             actual_doc_name = st.session_state.uploaded_file_names.get('EN', 'unknown_document.pdf')
                                             if actual_doc_name is None:
                                                 actual_doc_name = 'unknown_document.pdf'
-                                            doc_group = {"EN": actual_doc_name}
+                                            
+                                            # Use file path for content fingerprinting, but keep original name for display
+                                            doc_group = {"EN": actual_doc_path} if actual_doc_path else {"EN": actual_doc_name}
                                             
                                             # Use the actual models selected by the user from session state
                                             if hasattr(st.session_state, 'last_processing_params') and st.session_state.last_processing_params:

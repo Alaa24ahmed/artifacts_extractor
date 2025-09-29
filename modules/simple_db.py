@@ -9,7 +9,14 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
-import streamlit as st
+
+# Conditional streamlit import to avoid issues when not available
+try:
+    import streamlit as st
+    STREAMLIT_AVAILABLE = True
+except ImportError:
+    st = None
+    STREAMLIT_AVAILABLE = False
 
 # Load configuration using the configuration manager
 try:
@@ -221,13 +228,17 @@ class SimpleArtifactDB:
             else:
                 # Fallback to original filename from session state
                 try:
-                    original_name = st.session_state.uploaded_file_names.get(lang, "") if hasattr(st, 'session_state') else ""
-                    if original_name:
-                        content_hashes[lang] = hashlib.sha256(original_name.encode()).hexdigest()[:16]
-                        logger.debug(f"Using filename fallback for {lang}: {original_name}")
+                    if STREAMLIT_AVAILABLE and st and hasattr(st, 'session_state') and hasattr(st.session_state, 'uploaded_file_names'):
+                        original_name = st.session_state.uploaded_file_names.get(lang, "")
+                        if original_name:
+                            content_hashes[lang] = hashlib.sha256(original_name.encode()).hexdigest()[:16]
+                            logger.debug(f"Using filename fallback for {lang}: {original_name}")
+                        else:
+                            content_hashes[lang] = "missing"
+                            logger.warning(f"No file or filename available for {lang}")
                     else:
                         content_hashes[lang] = "missing"
-                        logger.warning(f"No file or filename available for {lang}")
+                        logger.debug(f"Session state not available for {lang}, using 'missing'")
                 except Exception as e:
                     logger.warning(f"Error accessing session state for {lang}: {e}")
                     content_hashes[lang] = "missing"
@@ -264,13 +275,17 @@ class SimpleArtifactDB:
         else:
             # Fallback to original filename from session state
             try:
-                original_name = st.session_state.uploaded_file_names.get("EN", "") if hasattr(st, 'session_state') else ""
-                if original_name:
-                    content_hash = hashlib.sha256(original_name.encode()).hexdigest()
-                    logger.debug(f"Using filename fallback for run cache: {original_name}")
+                if STREAMLIT_AVAILABLE and st and hasattr(st, 'session_state') and hasattr(st.session_state, 'uploaded_file_names'):
+                    original_name = st.session_state.uploaded_file_names.get("EN", "")
+                    if original_name:
+                        content_hash = hashlib.sha256(original_name.encode()).hexdigest()
+                        logger.debug(f"Using filename fallback for run cache: {original_name}")
+                    else:
+                        content_hash = "unknown_content"
+                        logger.warning("No English file or filename available for run cache")
                 else:
                     content_hash = "unknown_content"
-                    logger.warning("No English file or filename available for run cache")
+                    logger.debug("Session state not available for run cache, using 'unknown_content'")
             except Exception as e:
                 logger.warning(f"Error accessing session state for run cache: {e}")
                 content_hash = "unknown_content"
@@ -341,12 +356,16 @@ class SimpleArtifactDB:
                 else:
                     # Content-based fallback using original filename from session state
                     try:
-                        original_name = st.session_state.uploaded_file_names.get("EN", "") if hasattr(st, 'session_state') else ""
-                        if original_name:
-                            file_hash = hashlib.sha256(original_name.encode()).hexdigest()
-                            logger.info(f"💾 Using filename-based hash: {file_hash[:16]}... (from: {original_name})")
+                        if STREAMLIT_AVAILABLE and st and hasattr(st, 'session_state') and hasattr(st.session_state, 'uploaded_file_names'):
+                            original_name = st.session_state.uploaded_file_names.get("EN", "")
+                            if original_name:
+                                file_hash = hashlib.sha256(original_name.encode()).hexdigest()
+                                logger.info(f"💾 Using filename-based hash: {file_hash[:16]}... (from: {original_name})")
+                            else:
+                                logger.error("💾 Cannot create file hash - no file or filename available")
+                                return False
                         else:
-                            logger.error("💾 Cannot create file hash - no file or filename available")
+                            logger.error("💾 Cannot create file hash - session state not available and no file exists")
                             return False
                     except Exception as e:
                         logger.error(f"💾 Error accessing session state for file hash: {e}")
