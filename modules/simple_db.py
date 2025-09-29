@@ -148,8 +148,7 @@ class SimpleArtifactDB:
             ).hexdigest()
             
             logger.info(f"🔍 Checking cache for pages {start_page}-{end_page}")
-            logger.info(f"� Cache check parameters: OCR={ocr_model}, Extract={extraction_model}")
-            logger.info(f"�🚨 SIMPLE_DB DEBUG: end_page={end_page}, type={type(end_page)}")
+            logger.info(f"🔍 Cache check parameters: OCR={ocr_model}, Extract={extraction_model}")
             
             for page_num in requested_pages:
                 # Create page cache key
@@ -157,42 +156,17 @@ class SimpleArtifactDB:
                     doc_group, page_num, ocr_model, extraction_model, thresholds
                 )
                 
-                logger.warning(f"🔍 DEBUGGING: Checking cache for page {page_num} with key: {page_cache_key}")
-                
                 # Check if this page exists in cache
                 try:
-                    logger.warning(f"🔍 DEBUGGING: About to call RPC check_page_cache with key: {page_cache_key}")
                     result = self.supabase_client.rpc("check_page_cache", {
                         "p_page_cache_key": page_cache_key
                     }).execute()
-                    logger.warning(f"🔍 DEBUGGING: RPC result data length: {len(result.data) if result.data else 0}")
-                    if result.data:
-                        logger.warning(f"🔍 DEBUGGING: RPC found data: {result.data[:1]}")  # Show first record
                 except Exception as rpc_error:
                     logger.warning(f"⚠️ RPC call failed for page {page_num}, falling back to direct query: {rpc_error}")
                     # Fallback to direct table query
                     result = self.supabase_client.table("artifacts").select("*").eq(
                         "page_cache_key", page_cache_key
                     ).execute()
-                    logger.warning(f"🔍 DEBUGGING: Direct query result data length: {len(result.data) if result.data else 0}")
-                    if result.data:
-                        logger.warning(f"🔍 DEBUGGING: Direct query found data: {result.data[:1]}")  # Show first record
-                
-                # Also check what entries exist for this page number to compare
-                try:
-                    existing_entries = self.supabase_client.table("artifacts").select("page_cache_key,ocr_model,extraction_model").eq(
-                        "page_number", page_num
-                    ).limit(5).execute()
-                    if existing_entries.data:
-                        logger.warning(f"🔍 DEBUGGING: Found {len(existing_entries.data)} existing entries for page {page_num}")
-                        for i, entry in enumerate(existing_entries.data):
-                            logger.warning(f"🔍 DEBUGGING: Entry {i+1}: key={entry.get('page_cache_key', '')[:32]}..., ocr={entry.get('ocr_model', '')}, extract={entry.get('extraction_model', '')}")
-                            if entry.get('page_cache_key') == page_cache_key:
-                                logger.warning(f"🎯 DEBUGGING: EXACT MATCH FOUND! Key matches perfectly")
-                    else:
-                        logger.warning(f"🔍 DEBUGGING: No existing entries found for page {page_num}")
-                except Exception as e:
-                    logger.warning(f"🔍 DEBUGGING: Error checking existing entries: {e}")
                 
                 if result.data:
                     # Convert database format back to original format
@@ -240,16 +214,13 @@ class SimpleArtifactDB:
     
     def _create_page_cache_key(self, doc_group: dict, page_num: int, ocr_model: str, 
                               extraction_model: str, thresholds: dict) -> str:
-        """UPDATED: Create unique cache key using content fingerprints instead of file paths"""
-        logger.warning(f"🚀 USING NEW CACHE METHOD v3.0 for page {page_num}")
-        
+        """Create unique cache key using content fingerprints instead of file paths"""
         content_hashes = {}
         
         for lang, file_path in doc_group.items():
             if file_path and os.path.exists(file_path):
                 # Use content fingerprint for fast, reliable identification
                 content_hashes[lang] = self._create_content_fingerprint(file_path)
-                logger.warning(f"🆕 Content fingerprint for {lang}: {content_hashes[lang][:16]}...")
             else:
                 # Fallback to original filename from session state
                 try:
@@ -257,20 +228,16 @@ class SimpleArtifactDB:
                         original_name = st.session_state.uploaded_file_names.get(lang, "")
                         if original_name:
                             content_hashes[lang] = hashlib.sha256(original_name.encode()).hexdigest()[:16]
-                            logger.warning(f"🆕 Using filename fallback for {lang}: {original_name}")
                         else:
                             content_hashes[lang] = "missing"
-                            logger.warning(f"🆕 No file or filename available for {lang}")
                     else:
                         content_hashes[lang] = "missing"
-                        logger.warning(f"🆕 Session state not available for {lang}, using 'missing'")
-                except Exception as e:
-                    logger.warning(f"🆕 Error accessing session state for {lang}: {e}")
+                except Exception:
                     content_hashes[lang] = "missing"
         
-        # Create parameter combination - NOTE: Using 'content_hashes' NOT 'files'
+        # Create parameter combination
         params = {
-            'content_hashes': content_hashes,  # THIS IS THE KEY CHANGE!
+            'content_hashes': content_hashes,
             'page': page_num,
             'ocr_model': ocr_model,
             'extraction_model': extraction_model,
@@ -280,12 +247,6 @@ class SimpleArtifactDB:
         # Generate SHA-256 hash
         params_str = json.dumps(params, sort_keys=True)
         cache_key = hashlib.sha256(params_str.encode()).hexdigest()
-        
-        # Enhanced logging for debugging - VERSION 3.0
-        logger.warning(f"🆕 NEW CACHE KEY METHOD v3.0 - Page {page_num} cache key: {cache_key}")
-        logger.warning(f"🆕 NEW CACHE PARAMS - Content hashes: {content_hashes}")
-        logger.warning(f"🆕 NEW CACHE PARAMS - Page: {page_num}, OCR: {ocr_model}, Extraction: {extraction_model}")
-        logger.warning(f"🆕 NEW CACHE PARAMS - Full params string: {params_str}")
         
         return cache_key
     
