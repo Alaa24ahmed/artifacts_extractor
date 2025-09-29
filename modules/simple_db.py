@@ -9,6 +9,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from dotenv import load_dotenv
 from pathlib import Path
+import streamlit as st
 
 # Load configuration using the configuration manager
 try:
@@ -65,6 +66,41 @@ class SimpleArtifactDB:
             logger.error(f"Error hashing file {file_path}: {e}")
             return ""
     
+    def _create_content_fingerprint(self, file_path: str) -> str:
+        """Create a fast content fingerprint using file start + end + size
+        
+        This is much faster than full file hashing and sufficient for cache identification.
+        Combines file size, first 1KB, and last 1KB of content.
+        """
+        try:
+            if not os.path.exists(file_path):
+                logger.warning(f"File does not exist for fingerprinting: {file_path}")
+                return ""
+                
+            file_size = os.path.getsize(file_path)
+            
+            with open(file_path, 'rb') as f:
+                # Read first 1KB
+                start_chunk = f.read(1024)
+                
+                # Read last 1KB if file is large enough
+                if file_size > 2048:
+                    f.seek(-1024, 2)  # Seek to 1KB from end
+                    end_chunk = f.read(1024)
+                else:
+                    end_chunk = b""
+            
+            # Combine: file_size + start_chunk + end_chunk
+            fingerprint_data = f"{file_size}".encode() + start_chunk + end_chunk
+            fingerprint = hashlib.sha256(fingerprint_data).hexdigest()
+            
+            logger.debug(f"Created content fingerprint for {os.path.basename(file_path)}: {fingerprint[:16]}... (size: {file_size})")
+            return fingerprint
+            
+        except Exception as e:
+            logger.error(f"Error creating content fingerprint for {file_path}: {e}")
+            return ""
+    
     def check_page_level_cache(self, doc_group: dict, start_page: int, end_page,
                               ocr_model: str, extraction_model: str, thresholds: dict) -> tuple:
         """
@@ -105,7 +141,8 @@ class SimpleArtifactDB:
             ).hexdigest()
             
             logger.info(f"🔍 Checking cache for pages {start_page}-{end_page}")
-            logger.info(f"🚨 SIMPLE_DB DEBUG: end_page={end_page}, type={type(end_page)}")
+            logger.info(f"� Cache check parameters: OCR={ocr_model}, Extract={extraction_model}")
+            logger.info(f"�🚨 SIMPLE_DB DEBUG: end_page={end_page}, type={type(end_page)}")
             
             for page_num in requested_pages:
                 # Create page cache key
@@ -113,13 +150,15 @@ class SimpleArtifactDB:
                     doc_group, page_num, ocr_model, extraction_model, thresholds
                 )
                 
+                logger.debug(f"🔍 Checking cache for page {page_num} with key: {page_cache_key[:16]}...")
+                
                 # Check if this page exists in cache
                 try:
                     result = self.supabase_client.rpc("check_page_cache", {
                         "p_page_cache_key": page_cache_key
                     }).execute()
                 except Exception as rpc_error:
-                    logger.warning(f"RPC call failed for page {page_num}, falling back to direct query: {rpc_error}")
+                    logger.warning(f"⚠️ RPC call failed for page {page_num}, falling back to direct query: {rpc_error}")
                     # Fallback to direct table query
                     result = self.supabase_client.table("artifacts").select("*").eq(
                         "page_cache_key", page_cache_key
@@ -146,10 +185,10 @@ class SimpleArtifactDB:
                         page_artifacts.append(artifact)
                     
                     cached_artifacts.extend(page_artifacts)
-                    logger.info(f"✅ Page {page_num}: Found {len(page_artifacts)} cached artifacts")
+                    logger.info(f"✅ Cache HIT - Page {page_num}: Found {len(page_artifacts)} cached artifacts")
                 else:
                     missing_pages.append(page_num)
-                    logger.info(f"🔄 Page {page_num}: Needs processing")
+                    logger.info(f"❌ Cache MISS - Page {page_num}: Needs processing")
             
             cache_stats = {
                 "cached_pages": len(requested_pages) - len(missing_pages),
@@ -171,16 +210,31 @@ class SimpleArtifactDB:
     
     def _create_page_cache_key(self, doc_group: dict, page_num: int, ocr_model: str, 
                               extraction_model: str, thresholds: dict) -> str:
-        """Create unique cache key for a specific page with specific parameters"""
-        # Create file hashes for all documents
-        file_hashes = {}
+        """Create unique cache key using content fingerprints instead of file paths"""
+        content_hashes = {}
+        
         for lang, file_path in doc_group.items():
             if file_path and os.path.exists(file_path):
-                file_hashes[lang] = self._hash_file(file_path)
+                # Use content fingerprint for fast, reliable identification
+                content_hashes[lang] = self._create_content_fingerprint(file_path)
+                logger.debug(f"Content fingerprint for {lang}: {content_hashes[lang][:16]}...")
+            else:
+                # Fallback to original filename from session state
+                try:
+                    original_name = st.session_state.uploaded_file_names.get(lang, "") if hasattr(st, 'session_state') else ""
+                    if original_name:
+                        content_hashes[lang] = hashlib.sha256(original_name.encode()).hexdigest()[:16]
+                        logger.debug(f"Using filename fallback for {lang}: {original_name}")
+                    else:
+                        content_hashes[lang] = "missing"
+                        logger.warning(f"No file or filename available for {lang}")
+                except Exception as e:
+                    logger.warning(f"Error accessing session state for {lang}: {e}")
+                    content_hashes[lang] = "missing"
         
         # Create parameter combination
         params = {
-            'files': file_hashes,
+            'content_hashes': content_hashes,
             'page': page_num,
             'ocr_model': ocr_model,
             'extraction_model': extraction_model,
@@ -191,33 +245,38 @@ class SimpleArtifactDB:
         params_str = json.dumps(params, sort_keys=True)
         cache_key = hashlib.sha256(params_str.encode()).hexdigest()
         
-        # Debug logging
-        logger.debug(f"Created page cache key for page {page_num}: {cache_key[:16]}...")
-        logger.debug(f"Parameters: {params_str[:100]}...")
+        # Enhanced logging for debugging
+        logger.debug(f"🔍 Content fingerprints: {content_hashes}")
+        logger.debug(f"🔍 Cache key components: OCR={ocr_model}, Extract={extraction_model}, Page={page_num}")
+        logger.debug(f"🔍 Generated cache key: {cache_key[:16]}...")
         
         return cache_key
     
     def _create_run_cache_key(self, doc_group: dict, start_page: int, end_page: int,
                              ocr_model: str, extraction_model: str, thresholds: dict) -> str:
-        """Create unique cache key for an entire processing run"""
-        # Get main English file hash
+        """Create unique cache key for an entire processing run using content"""
         en_file = doc_group.get("EN")
-        file_hash = self._hash_file(en_file) if en_file else ""
         
-        # If we can't hash the original file, generate a content-based fallback for caching
-        if not file_hash:
-            # For caching purposes, we need a deterministic hash based on document identity
-            file_basename = os.path.basename(en_file) if en_file else "unknown_document"
-            # Remove the random prefix that Streamlit adds, keep the core identifier
-            if file_basename.startswith("imported_file_"):
-                core_name = file_basename.replace("imported_file_", "")
-            else:
-                core_name = file_basename
-            
-            file_hash = hashlib.sha256(core_name.encode()).hexdigest()
+        if en_file and os.path.exists(en_file):
+            # Use content fingerprint for reliable identification
+            content_hash = self._create_content_fingerprint(en_file)
+            logger.debug(f"Using content fingerprint for run cache: {content_hash[:16]}...")
+        else:
+            # Fallback to original filename from session state
+            try:
+                original_name = st.session_state.uploaded_file_names.get("EN", "") if hasattr(st, 'session_state') else ""
+                if original_name:
+                    content_hash = hashlib.sha256(original_name.encode()).hexdigest()
+                    logger.debug(f"Using filename fallback for run cache: {original_name}")
+                else:
+                    content_hash = "unknown_content"
+                    logger.warning("No English file or filename available for run cache")
+            except Exception as e:
+                logger.warning(f"Error accessing session state for run cache: {e}")
+                content_hash = "unknown_content"
         
         params = {
-            'file_hash': file_hash,
+            'content_hash': content_hash,
             'start_page': start_page,
             'end_page': end_page,
             'ocr_model': ocr_model,
@@ -226,7 +285,10 @@ class SimpleArtifactDB:
         }
         
         params_str = json.dumps(params, sort_keys=True)
-        return hashlib.sha256(params_str.encode()).hexdigest()
+        run_cache_key = hashlib.sha256(params_str.encode()).hexdigest()
+        
+        logger.debug(f"🔍 Run cache key generated: {run_cache_key[:16]}...")
+        return run_cache_key
     
     def _map_artifact_to_new_schema(self, artifact: dict, page_cache_key: str, 
                                    page_num: int, ocr_model: str, extraction_model: str,
@@ -266,33 +328,32 @@ class SimpleArtifactDB:
         logger.info(f"💾 DB Save - OCR model: '{ocr_model}', Extraction model: '{extraction_model}'")
             
         try:
-            # Get main file hash - use provided hash if available, otherwise try to hash the file
+            # Get main file hash - use provided hash if available, otherwise create content fingerprint
             if provided_file_hash:
                 file_hash = provided_file_hash
                 logger.info(f"💾 Using provided file hash: {file_hash[:16]}...")
             else:
                 en_file = doc_group.get("EN", "")
-                file_hash = self._hash_file(en_file) if en_file and os.path.exists(en_file) else ""
-                
-                # If we can't hash the original file (e.g., temporary file no longer exists),
-                # we need a content-based fallback for caching to work properly
-                if not file_hash:
-                    # For caching purposes, we need a deterministic hash based on document identity
-                    # Use the original filename (which contains unique ID) as the basis
-                    # This allows cache hits when same document is re-uploaded
-                    file_basename = os.path.basename(en_file) if en_file else "unknown_document"
-                    # Remove the random prefix that Streamlit adds, keep the core identifier
-                    if file_basename.startswith("imported_file_"):
-                        # Extract the unique part: imported_file_0e6834e5.pdf -> 0e6834e5.pdf
-                        core_name = file_basename.replace("imported_file_", "")
-                    else:
-                        core_name = file_basename
-                    
-                    file_hash = hashlib.sha256(core_name.encode()).hexdigest()
-                    logger.warning(f"Using content-based fallback hash for caching: {core_name}")
+                if en_file and os.path.exists(en_file):
+                    # Use content fingerprint for reliable, fast identification
+                    file_hash = self._create_content_fingerprint(en_file)
+                    logger.info(f"💾 Created content fingerprint: {file_hash[:16]}...")
+                else:
+                    # Content-based fallback using original filename from session state
+                    try:
+                        original_name = st.session_state.uploaded_file_names.get("EN", "") if hasattr(st, 'session_state') else ""
+                        if original_name:
+                            file_hash = hashlib.sha256(original_name.encode()).hexdigest()
+                            logger.info(f"💾 Using filename-based hash: {file_hash[:16]}... (from: {original_name})")
+                        else:
+                            logger.error("💾 Cannot create file hash - no file or filename available")
+                            return False
+                    except Exception as e:
+                        logger.error(f"💾 Error accessing session state for file hash: {e}")
+                        return False
             
             if not file_hash:
-                logger.error("Cannot create file hash for page artifacts")
+                logger.error("💾 Cannot create file hash for page artifacts")
                 return False
             
             # Create cache keys
